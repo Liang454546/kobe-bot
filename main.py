@@ -11,7 +11,8 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # ==========================================
 # 👇 您之前可能不小心刪掉的部分 (定義 bot) 👇
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+# 加入 help_command=None 以關閉預設的醜介面
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 # ==========================================
 
 @bot.event
@@ -45,3 +46,4 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
