@@ -4,28 +4,19 @@ import asyncio
 from discord.ext import commands
 from dotenv import load_dotenv
 
-# 載入 .env 中的 Token
-load_dotenv()# 正確：
+# 1. 匯入剛剛寫的 keep_alive
+from keep_alive import keep_alive 
+
+load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-# 設定意圖 (Intents) - 因為是小伺服器，我們全開
-intents = discord.Intents.all()
 
-# 設定指令前綴，例如 !help
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-@bot.event
-async def on_ready():
-    print(f'機器人 {bot.user} 已登入！')
-    print('------')
-
-async def load_extensions():
-    # 載入 cogs 資料夾內的檔案
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            await bot.load_extension(f'cogs.{filename[:-3]}')
+# ... (中間的程式碼都不用動) ...
 
 async def main():
     async with bot:
+        # 2. 在啟動機器人之前，先啟動小網站
+        keep_alive() 
+        
         await load_extensions()
         await bot.start(TOKEN)
 
@@ -33,7 +24,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # 處理 Ctrl+C 結束
         pass
-
-
