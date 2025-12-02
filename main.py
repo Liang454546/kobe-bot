@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 # 載入 .env 中的 Token
 load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
+TOKEN = os.getenv('MTQ0NTAxMTAwNTQ1NjUxNTA4OA.G9zyGz.qQwCId7TALvlE_A_JJ1nvq-kl73OktuGKi7NMU')
 
 # 設定意圖 (Intents) - 因為是小伺服器，我們全開
 intents = discord.Intents.all()
@@ -36,3 +36,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         # 處理 Ctrl+C 結束
         pass
+
