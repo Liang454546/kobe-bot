@@ -4,6 +4,7 @@ import aiosqlite
 import time
 from datetime import datetime, timedelta
 import random
+import asyncio 
 
 class Game(commands.Cog):
     def __init__(self, bot):
@@ -11,16 +12,18 @@ class Game(commands.Cog):
         self.active_sessions = {} 
         self.db_name = "game_stats.db"
         
-        # 針對遊戲的罵人清單
+        # --- 1. 針對特定遊戲的罵人清單 ---
         self.targeted_roasts = {
             "gta": "俠盜獵車手？🚗 這裡不是洛聖都，這裡是現實世界！快去努力工作！",
+            "grand theft auto": "還在 Grand Theft Auto？除了偷車你還會什麼？去偷點時間來唸書吧！",
             "nba": "玩 NBA 2K？🏀 手指動得比腳快有什麼用？去球場流汗！",
             "league of legends": "又在打 LOL？💀 心態炸裂了嗎？關掉它！",
+            "valorant": "特戰英豪？槍法再準，現實生活射不中目標有什麼用？",
             "apex": "APEX？你的肝還好嗎？別再當滋崩狗了！",
             "原神": "啟動？😱 給我把書桌前的燈啟動！別再抽卡了！"
         }
         
-        # 通用罵人清單
+        # --- 2. 通用罵人清單 ---
         self.default_roasts = [
             "抓到了！{member} 竟然在玩 **{game}**！不用唸書/工作嗎？😡",
             "看到 {member} 在玩 **{game}**，曼巴精神去哪了？",
@@ -29,13 +32,11 @@ class Game(commands.Cog):
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
-            # 1. 遊戲時間表
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS playtime (
                     user_id INTEGER, game_name TEXT, seconds INTEGER, last_played DATE
                 )
             ''')
-            # 2. 經濟系統表 (記錄錢包餘額 + 上次領獎勵的時間)
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS economy (
                     user_id INTEGER PRIMARY KEY, 
@@ -45,7 +46,7 @@ class Game(commands.Cog):
             ''')
             await db.commit()
 
-    # --- 遊戲偵測邏輯 (保持不變，已優化偵測) ---
+    # --- 遊戲偵測邏輯 ---
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
         if after.bot: return
@@ -56,7 +57,7 @@ class Game(commands.Cog):
 
         if new_game == old_game: return
 
-        # 結束舊遊戲
+        # 結束舊遊戲 (結算)
         if old_game:
             if user_id in self.active_sessions:
                 session = self.active_sessions[user_id]
@@ -65,17 +66,29 @@ class Game(commands.Cog):
                     await self.save_to_db(user_id, old_game, duration)
                     del self.active_sessions[user_id]
 
-        # 開始新遊戲
+        # 開始新遊戲 (罵人)
         if new_game:
             self.active_sessions[user_id] = {"game": new_game, "start": time.time()}
             
-            # 發送罵人訊息
-            channel = after.guild.system_channel
+            # --- 🔍 修正後的找頻道邏輯 ---
+            target_channels = ["general", "chat", "聊天", "主頻道", "公頻", "閒聊"]
+            channel = None
+            
+            # 1. 先嘗試找名字裡有「general, chat...」的文字頻道
+            for c in after.guild.text_channels:
+                if c.permissions_for(after.guild.me).send_messages:
+                    if any(name in c.name.lower() for name in target_channels):
+                        channel = c
+                        break
+            
+            # 2. 如果沒找到，就找「第一個」機器人能講話的文字頻道 (放棄 System Channel)
             if not channel:
                 for c in after.guild.text_channels:
                     if c.permissions_for(after.guild.me).send_messages:
-                        channel = c; break
+                        channel = c
+                        break
             
+            # 發送訊息
             if channel:
                 game_lower = new_game.lower()
                 msg = None
@@ -93,9 +106,8 @@ class Game(commands.Cog):
             await db.execute("INSERT INTO playtime VALUES (?, ?, ?, ?)", (user_id, game_name, seconds, today))
             await db.commit()
 
-    # --- 💰 曼巴經濟系統指令 ---
+    # --- 💰 經濟指令 ---
 
-    # 1. 查詢錢包 & 領取每日獎勵
     @commands.command()
     async def wallet(self, ctx):
         user_id = ctx.author.id
@@ -103,161 +115,174 @@ class Game(commands.Cog):
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
         async with aiosqlite.connect(self.db_name) as db:
-            # 取得目前餘額與上次領獎時間
             cursor = await db.execute("SELECT balance, last_daily_claim FROM economy WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
-            
             balance = row[0] if row else 0
             last_claim = row[1] if row else None
 
             msg = f"💰 **{ctx.author.display_name} 的錢包**\n目前餘額：`{balance}` 曼巴幣\n"
 
-            # --- 判斷是否可以領每日獎勵 ---
             if last_claim != today_str:
-                # 檢查昨天的遊戲時間
                 cursor = await db.execute("SELECT SUM(seconds) FROM playtime WHERE user_id = ? AND last_played = ?", (user_id, yesterday_str))
                 play_row = await cursor.fetchone()
                 yesterday_seconds = play_row[0] if play_row[0] else 0
                 
-                # 如果昨天玩少於 1 小時 (3600秒)
-                if yesterday_seconds < 3600:
+                if yesterday_seconds < 3600: # 1小時內
                     reward = 10
                     new_balance = balance + reward
-                    
-                    # 更新資料庫
                     if row:
                         await db.execute("UPDATE economy SET balance = ?, last_daily_claim = ? WHERE user_id = ?", (new_balance, today_str, user_id))
                     else:
                         await db.execute("INSERT INTO economy (user_id, balance, last_daily_claim) VALUES (?, ?, ?)", (reward, today_str, user_id))
-                    
                     await db.commit()
-                    msg += f"\n🎁 **每日結算：** 昨天你很自律 (玩遊戲 < 1小時)！\n獲得獎勵：`+10` 曼巴幣 (目前: {new_balance})"
+                    msg += f"\n🎁 **每日結算：** 昨天你很自律！獲得 `+10` 幣！"
                 else:
-                    # 昨天玩太久，沒獎勵，但也更新領取狀態以免重複檢查
-                    hours = yesterday_seconds // 3600
                     if row:
                         await db.execute("UPDATE economy SET last_daily_claim = ? WHERE user_id = ?", (today_str, user_id))
                     else:
                         await db.execute("INSERT INTO economy (user_id, balance, last_daily_claim) VALUES (?, ?, ?)", (0, today_str, user_id))
                     await db.commit()
-                    msg += f"\n❌ **每日結算：** 昨天你玩了 {hours} 小時的遊戲！沒有獎勵！🤬"
+                    msg += f"\n❌ **每日結算：** 昨天玩太久了，沒收獎勵！"
             else:
-                msg += "\n✅ 今日獎勵已結算過。"
-            
+                msg += "\n✅ 今日已結算。"
             await ctx.send(msg)
 
-    # 2. 商店系統 (!buy)
     @commands.command()
     async def buy(self, ctx, item: str = None, target: discord.Member = None):
         if not item:
             embed = discord.Embed(title="🛒 曼巴雜貨店", color=0x00ff00)
-            embed.add_field(name="`!buy roast @人` (5幣)", value="花錢請機器人狠狠罵他一頓。", inline=False)
-            embed.add_field(name="`!buy pardon` (20幣)", value="消除自己 **今天** 的所有遊戲紀錄 (買通裁判)。", inline=False)
-            embed.add_field(name="`!buy rename @人` (50幣)", value="強制幫對方改一個羞恥暱稱 (需機器人有權限)。", inline=False)
+            embed.add_field(name="`!buy roast @人` (5幣)", value="花錢請機器人罵他。", inline=False)
+            embed.add_field(name="`!buy pardon` (20幣)", value="消除今日遊戲紀錄。", inline=False)
+            embed.add_field(name="`!buy rename @人` (50幣)", value="幫對方改羞恥暱稱。", inline=False)
             await ctx.send(embed=embed)
             return
 
         user_id = ctx.author.id
         async with aiosqlite.connect(self.db_name) as db:
-            # 檢查餘額
             cursor = await db.execute("SELECT balance FROM economy WHERE user_id = ?", (user_id,))
             row = await cursor.fetchone()
             balance = row[0] if row else 0
 
-            # --- 商品 1: Roast (罵人) ---
             if item == "roast":
                 cost = 5
-                if not target:
-                    await ctx.send("你要罵誰？請標記他！範例：`!buy roast @小明`")
+                if not target or balance < cost:
+                    await ctx.send("❌ 錢不夠或沒標記人！")
                     return
-                if balance < cost:
-                    await ctx.send(f"❌ 餘額不足！你需要 {cost} 幣。")
-                    return
-                
-                # 扣款
                 await db.execute("UPDATE economy SET balance = balance - ? WHERE user_id = ?", (cost, user_id))
                 await db.commit()
-                
-                # 執行罵人
-                roasts = [
-                    f"喂 {target.mention}！有人花錢要我告訴你：你打球像蔡徐坤！",
-                    f"{target.mention}，聽說你最近很囂張？也不照照鏡子！",
-                    f"{target.mention}，如果你把打遊戲的時間拿來練球，早就進 NBA 了，廢物！"
-                ]
-                await ctx.send(f"💸 交易成功！(餘額剩 {balance - cost})")
+                roasts = [f"喂 {target.mention}！有人花錢叫我罵你：你是軟蛋！", f"{target.mention}，如果你把打遊戲的時間拿來練球，早就進 NBA 了！"]
                 await ctx.send(random.choice(roasts))
 
-            # --- 商品 2: Pardon (消除紀錄) ---
             elif item == "pardon":
                 cost = 20
                 if balance < cost:
-                    await ctx.send(f"❌ 餘額不足！你需要 {cost} 幣。")
+                    await ctx.send("❌ 錢不夠！")
                     return
-                
-                # 扣款並刪除今日紀錄
                 today_str = datetime.now().strftime('%Y-%m-%d')
                 await db.execute("UPDATE economy SET balance = balance - ? WHERE user_id = ?", (cost, user_id))
                 await db.execute("DELETE FROM playtime WHERE user_id = ? AND last_played = ?", (user_id, today_str))
                 await db.commit()
-                
-                await ctx.send(f"💸 **裁判已被買通！**\n{ctx.author.mention} 今天的所有遊戲時長紀錄已銷毀... 噓！🤫")
+                await ctx.send(f"💸 {ctx.author.mention} 買通了裁判，今日紀錄已銷毀！")
 
-            # --- 商品 3: Rename (改名) ---
             elif item == "rename":
                 cost = 50
-                if not target:
-                    await ctx.send("你要改誰的名？範例：`!buy rename @小明`")
+                if not target or balance < cost:
+                    await ctx.send("❌ 錢不夠或沒標記人！")
                     return
-                if balance < cost:
-                    await ctx.send(f"❌ 餘額不足！你需要 {cost} 幣。")
-                    return
-                
-                # 檢查權限
-                if not ctx.guild.me.guild_permissions.manage_nicknames:
-                    await ctx.send("❌ 機器人沒有「管理暱稱」權限，無法執行！(錢沒扣)")
-                    return
-                if target.top_role >= ctx.guild.me.top_role:
-                    await ctx.send("❌ 我無法修改該成員的暱稱 (他的權限比我高或跟我一樣)。")
-                    return
-
-                # 扣款
                 await db.execute("UPDATE economy SET balance = balance - ? WHERE user_id = ?", (cost, user_id))
                 await db.commit()
-
-                # 執行改名
-                shameful_names = ["我愛打鐵", "我是軟蛋", "躺分仔", "飲水機守護神", "20年老替補"]
-                new_name = random.choice(shameful_names)
+                names = ["我愛打鐵", "我是軟蛋", "20年老替補", "飲水機守護神"]
                 try:
-                    await target.edit(nick=new_name)
-                    await ctx.send(f"💸 交易成功！\n**{target.name}** 的名字已經被改成 **「{new_name}」** 了！哈哈哈哈！")
-                except Exception as e:
-                    await ctx.send(f"改名失敗：{e}")
+                    await target.edit(nick=random.choice(names))
+                    await ctx.send(f"💸 交易成功！{target.mention} 被強制改名了！")
+                except:
+                    await ctx.send("❌ 改名失敗 (權限不足)，但錢已經扣了嘿嘿！")
 
-            else:
-                await ctx.send("❌ 沒賣這個東西！請輸入 `!buy` 查看商品列表。")
+    # --- 🏀 1 on 1 單挑系統 (新功能) ---
+    @commands.command()
+    async def duel(self, ctx, target: discord.Member, amount: int):
+        if target.bot or target == ctx.author or amount <= 0:
+            await ctx.send("❌ 無效的對手或金額！")
+            return
 
-    # 保留原本的 rank 指令...
+        user_id = ctx.author.id
+        target_id = target.id
+
+        async with aiosqlite.connect(self.db_name) as db:
+            # 檢查雙方餘額
+            cursor = await db.execute("SELECT balance FROM economy WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            if not row or row[0] < amount:
+                await ctx.send("❌ 你的錢不夠！")
+                return
+            
+            cursor = await db.execute("SELECT balance FROM economy WHERE user_id = ?", (target_id,))
+            row = await cursor.fetchone()
+            if not row or row[0] < amount:
+                await ctx.send("❌ 對手太窮了！")
+                return
+
+        # 發起挑戰
+        await ctx.send(f"🏀 **單挑挑戰書**\n{ctx.author.mention} 挑戰 {target.mention}！賭金 `{amount}` 幣。\n{target.mention} 請輸入 `accept` 接受，或 `refuse` 拒絕。")
+
+        def check(m):
+            return m.author == target and m.channel == ctx.channel and m.content.lower() in ['accept', 'refuse']
+
+        try:
+            msg = await self.bot.wait_for('message', check=check, timeout=30.0)
+            if msg.content.lower() == 'refuse':
+                await ctx.send(f"👎 {target.mention} 拒絕了挑戰，全場噓聲！")
+                return
+            
+            await ctx.send("🏀 比賽開始！雙方激烈攻防...")
+            await asyncio.sleep(2) # 營造緊張氣氛
+            
+            s1 = random.randint(0, 100) # 發起者分數
+            s2 = random.randint(0, 100) # 對手分數
+            while s1 == s2: s1, s2 = random.randint(0, 100), random.randint(0, 100)
+
+            result = f"📊 **{ctx.author.display_name}** {s1} : {s2} **{target.display_name}**\n"
+            
+            async with aiosqlite.connect(self.db_name) as db:
+                if s1 > s2:
+                    await db.execute("UPDATE economy SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+                    await db.execute("UPDATE economy SET balance = balance - ? WHERE user_id = ?", (amount, target_id))
+                    result += f"🏆 **勝者：{ctx.author.mention}**！贏走了 `{amount}` 幣！"
+                else:
+                    await db.execute("UPDATE economy SET balance = balance - ? WHERE user_id = ?", (amount, user_id))
+                    await db.execute("UPDATE economy SET balance = balance + ? WHERE user_id = ?", (amount, target_id))
+                    result += f"🏆 **勝者：{target.mention}**！反殺成功，贏走了 `{amount}` 幣！"
+                await db.commit()
+            
+            await ctx.send(result)
+        except asyncio.TimeoutError:
+            await ctx.send(f"⏳ {target.mention} 遲遲不敢應戰，比賽取消。")
+
     @commands.command()
     async def rank(self, ctx):
-        # (這裡不需要改，用您原本的 rank 程式碼即可，或者用我上一篇優化過的)
-        # 為節省篇幅，這裡預設保留上一篇的 rank 邏輯
         try:
             async with aiosqlite.connect(self.db_name) as db:
-                cursor = await db.execute('SELECT user_id, SUM(seconds) as total FROM playtime GROUP BY user_id ORDER BY total DESC LIMIT 5')
+                cursor = await db.execute('SELECT user_id, SUM(seconds) as total FROM playtime GROUP BY user_id ORDER BY total DESC LIMIT 10')
                 rows = await cursor.fetchall()
                 if not rows:
-                    await ctx.send("目前沒有紀錄！")
+                    await ctx.send("📊 資料庫空空如也！")
                     return
+                
                 embed = discord.Embed(title="🏆 偷懶排行榜", color=0xffd700)
                 text = ""
                 for idx, (uid, sec) in enumerate(rows):
                     m = ctx.guild.get_member(uid)
-                    name = m.display_name if m else str(uid)
+                    name = m.display_name if m else f"用戶({uid})"
                     text += f"{idx+1}. **{name}**: {sec//3600}小時 {(sec%3600)//60}分\n"
                 embed.add_field(name="名單", value=text)
+                
+                if self.active_sessions:
+                    playing = [f"• {ctx.guild.get_member(u).display_name} 玩 {d['game']}" for u, d in self.active_sessions.items() if ctx.guild.get_member(u)]
+                    if playing: embed.add_field(name="🔴 進行中", value="\n".join(playing), inline=False)
+                
                 await ctx.send(embed=embed)
         except Exception as e:
-            await ctx.send(f"Rank Error: {e}")
+            await ctx.send(f"❌ Error: {e}")
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
