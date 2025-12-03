@@ -3,4 +3,4 @@ python-dotenv
 aiosqlite
 Flask
 PyNaCl
-groq  
+google-generativeai
