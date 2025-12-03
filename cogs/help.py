@@ -14,7 +14,7 @@ class HelpView(View):
         super().__init__(timeout=180)
         self.bot = bot
         self.ctx = ctx
-        self.model = model  # 直接傳入已初始化的 model（推薦！）
+        self.model = model  # 優先使用從 Game Cog 傳來的已初始化模型
         self.ai_status = "🔴 離線 (備用模式)"
 
         # 如果沒傳 model，就嘗試自己初始化（備用方案）
@@ -24,7 +24,7 @@ class HelpView(View):
                 try:
                     genai.configure(api_key=api_key)
                     self.model = genai.GenerativeModel(
-                        "gemini-1.5-flash",  # 2025 穩定王者
+                        "gemini-1.5-flash",
                         generation_config={"temperature": 0.9, "max_output_tokens": 100}
                     )
                     self.ai_status = "AI 線上 (Gemini 1.5 Flash)"
@@ -35,6 +35,8 @@ class HelpView(View):
                     self.ai_status = "離線 (使用 Kobe 語錄)"
             else:
                 self.ai_status = "離線 (無 API Key)"
+        else:
+            self.ai_status = "🟢 AI 線上 (Gemini 2.0)"
 
     async def on_timeout(self):
         for child in self.children:
@@ -44,7 +46,7 @@ class HelpView(View):
         except:
             pass
 
-    # 真正的異步 AI 呼叫（不再卡死！）
+    # 真正的異步 AI 呼叫
     async def ask_kobe(self, prompt: str) -> str:
         if not self.model:
             return "軟蛋！連 AI 都懶得理你 🥚"
@@ -62,19 +64,18 @@ class HelpView(View):
             logger.error(f"Help AI 生成失敗: {e}")
             return "Mamba 不說第二次！快去訓練！🏀"
 
-    @discord.ui.button(label="控制台首頁", style=discord.ButtonStyle.primary, emoji="Home")
+    @discord.ui.button(label="控制台首頁", style=discord.ButtonStyle.primary, emoji="🏠")
     async def home_button(self, interaction: discord.Interaction, button: Button):
         latency = round(self.bot.latency * 1000) if self.bot.latency else 0
 
         embed = discord.Embed(
             title="Kobe Bot · 曼巴訓練營總部",
             description=(
-                "這裡不是幼稚園，是地獄訓練營！\n"
-                "軟蛋與拖延症，在此終結。🐍\n\n"
-                f"**AI 大腦**：`{self.ai_status}`\n"
-                f"**延遲**：`{latency}ms`\n"
+                "歡迎來到曼巴精神訓練營。\n"
+                "我不是來這裡交朋友的，我是來督促你變強的。\n\n"
+                f"**🤖 AI 大腦**：`{self.ai_status}`\n"
+                f"**⏱️ 延遲**：`{latency}ms`\n"
                 f"**伺服器**：{len(self.bot.guilds)} 座訓練營\n"
-                f"**今日廢物指數**：還在計算... 別讓我失望 😤"
             ),
             color=0x9b59b6
         )
@@ -84,14 +85,14 @@ class HelpView(View):
 
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="被動監控", style=discord.ButtonStyle.danger, emoji="Eyes")
+    @discord.ui.button(label="被動監控", style=discord.ButtonStyle.danger, emoji="👁️")
     async def passive_button(self, interaction: discord.Interaction, button: Button):
         ai_text = await self.ask_kobe(
             "用 Kobe 口氣解釋這個 bot 的被動功能：圖片審判、情緒偵測、凌晨4點點名、語音結算、拖延症雷達"
         )
 
         embed = discord.Embed(
-            title="曼巴全方位監控系統",
+            title="👁️ 曼巴全方位監控系統",
             description=ai_text,
             color=0xe74c3c
         )
@@ -106,10 +107,10 @@ class HelpView(View):
 
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="主動指令", style=discord.ButtonStyle.success, emoji="Lightning")
+    @discord.ui.button(label="主動指令", style=discord.ButtonStyle.success, emoji="⚡")
     async def active_button(self, interaction: discord.Interaction, button: Button):
         embed = discord.Embed(
-            title="主動證明你不是軟蛋",
+            title="⚡ 主動證明你不是軟蛋",
             description="用行動打臉拖延症！",
             color=0x2ecc71
         )
@@ -123,7 +124,7 @@ class HelpView(View):
 
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="關於 Kobe Bot", style=discord.ButtonStyle.gray, emoji="Information")
+    @discord.ui.button(label="關於 Kobe Bot", style=discord.ButtonStyle.gray, emoji="ℹ️")
     async def about_button(self, interaction: discord.Interaction, button: Button):
         ai_text = await self.ask_kobe("用 Kobe 的語氣介紹自己：你是誰？為什麼在這個 3 人小伺服器？")
 
@@ -132,18 +133,26 @@ class HelpView(View):
             description=ai_text,
             color=0x34495e
         )
-        embed.set_image(url="https://i.imgur.com/3ZQyX0Y.png")  # Kobe 經典曼巴照
+        embed.set_image(url="https://i.imgur.com/3ZQyX0Y.png")
         embed.set_footer(text="Mamba Mentality isn’t about seeking a result. It’s about the process.")
 
         await interaction.response.edit_message(embed=embed, view=self)
 
-# 使用方式（在指令中）
-@commands.command(name="help", aliases=["h", "面板"])
-async def help_cmd(self, ctx):
-    # 推薦：從 Game Cog 傳入已初始化的 model（最穩定！）
-    game_cog = self.bot.get_cog("Game")
-    model = getattr(game_cog, "model", None) if game_cog else None
+# 🔥 關鍵修正：將指令包裝在 Cog 類別中，並加上 setup 函式
+class Help(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
-    view = HelpView(self.bot, ctx, model=model)
-    message = await ctx.send("```🏀 曼巴訓練營控制面板載入中...```", view=view)
-    view.message = message  # 讓 timeout 能正確 edit
+    @commands.command(name="help", aliases=["h", "面板"])
+    async def help_cmd(self, ctx):
+        # 嘗試從 Game Cog 獲取已初始化的強大模型，省資源
+        game_cog = self.bot.get_cog("Game")
+        model = getattr(game_cog, "model", None) if game_cog else None
+
+        view = HelpView(self.bot, ctx, model=model)
+        message = await ctx.send("```🏀 曼巴訓練營控制面板載入中...```", view=view)
+        view.message = message
+
+# 🔥 這就是您之前缺少的「入口鑰匙」
+async def setup(bot):
+    await bot.add_cog(Help(bot))
