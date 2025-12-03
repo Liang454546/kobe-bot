@@ -80,12 +80,12 @@ class Game(commands.Cog):
         now = time.time()
         user_id = message.author.id
         # 冷卻 15 秒
-        if user_id in self.cooldowns and now - self.cooldowns[user_id] < 15:
+        if user_id in self.cooldowns and now - self.cooldowns[user_id] < 2:
             return
         self.cooldowns[user_id] = now
 
         async with message.channel.typing():
-            reply = await self.ask_kobe(f"用戶說：'{message.content}'，用毒舌 Kobe 語氣回應，30字內")
+            reply = await self.ask_kobe(f"用戶說：'{message.content}'，用溫馨 Kobe 語氣回應 有趣有耿 不恭維  痛恨nba2k，30字內")
             if reply:
                 await message.reply(reply)
                 # 簡單紀錄名言
@@ -284,3 +284,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
