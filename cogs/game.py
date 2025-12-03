@@ -46,7 +46,7 @@ class Game(commands.Cog):
 
         self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
+        self.kobe_quotes = ["Mamba Out. 🎤", "尼哥別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強尼哥。🐍", "Soft. 🥚"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -99,7 +99,7 @@ class Game(commands.Cog):
         if not sorted_stats:
             return await ctx.send("📊 目前沒有遊戲紀錄！")
 
-        embed = discord.Embed(title="🏆 遊戲時長排行榜", color=0xffd700)
+        embed = discord.Embed(title="🏆 偷懶黑鬼尼哥遊戲時長排行榜 再玩要被當光光了", color=0xffd700)
         desc = ""
         for i, (uid, seconds) in enumerate(sorted_stats):
             member = ctx.guild.get_member(uid)
@@ -155,7 +155,7 @@ class Game(commands.Cog):
             cooldown_dict[user_id] = now
 
         try:
-            sys_prompt = "你是 Kobe Bryant。語氣毒舌、嚴格。教練模式：回答問題要專業，面對偷懶要罵人。繁體中文(台灣)。"
+            sys_prompt = "你是 Kobe Bryant。有梗 語氣祥和、專業。教練模式：回答問題要專業，簡答 。繁體中文(台灣)。"
             response = await asyncio.to_thread(self.model.generate_content, contents=[sys_prompt, f"用戶：{prompt}"])
             return response.text
         except: return None
@@ -177,7 +177,7 @@ class Game(commands.Cog):
 
         if new_game and not old_game:
             self.active_sessions[user_id] = {"game": new_game, "start": time.time(), "1h_warned": False, "2h_warned": False}
-            roast = await self.ask_kobe(f"這軟蛋開始玩 {new_game} 了，罵他。", user_id, self.ai_roast_cooldowns, 300)
+            roast = await self.ask_kobe(f"這尼哥開始玩 {new_game} 了，罵他。", user_id, self.ai_roast_cooldowns, 300)
             if channel: await channel.send(roast or f"{after.mention} 玩 **{new_game}**？不用唸書嗎？😡")
 
         elif old_game and not new_game:
@@ -204,7 +204,7 @@ class Game(commands.Cog):
             return
 
         if any(w in message.content for w in self.weak_words):
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
+            await message.channel.send(f"{message.author.mention} 累了？尼哥！😤")
             await self.update_daily_stats(message.author.id, "lazy_points", 2)
             
         await self.bot.process_commands(message)
@@ -279,3 +279,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
