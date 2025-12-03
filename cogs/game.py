@@ -25,7 +25,7 @@ class Game(commands.Cog):
         if api_key:
             genai.configure(api_key=api_key)
             # 使用 Flash 模型 (速度快、省額度)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-pro')
             self.has_ai = True
             print("✅ AI 模組已啟動 (Gemini 1.5 Flash)")
         else:
@@ -360,3 +360,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
