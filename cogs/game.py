@@ -14,40 +14,29 @@ class Game(commands.Cog):
         self.db_name = "mamba_system.db"
         self.active_sessions = {}
         self.focus_sessions = {}
-        self.chat_cooldowns = {}      # 榮譽系統冷卻
+        
+        # --- 冷卻系統 (API 省流關鍵) ---
+        self.chat_cooldowns = {}      # 藉口粉碎機冷卻 (被動監聽)
         self.ai_roast_cooldowns = {}  # 遊戲罵人 AI 冷卻
         self.ai_chat_cooldowns = {}   # 對話 AI 冷卻
         
-        # --- 1. 設定 Google Gemini AI (使用 Flash 模型省流) ---
+        # --- 1. 設定 Google Gemini AI ---
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             genai.configure(api_key=api_key)
-            # 使用 gemini-1.5-flash，速度快且省額度
+            # 使用 Flash 模型 (速度快、省額度)
             self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.has_ai = True
             print("✅ AI 模組已啟動 (Gemini 1.5 Flash)")
         else:
-            print("⚠️ 警告：找不到 GEMINI_API_KEY，將使用備用語錄。")
+            print("⚠️ 警告：找不到 GEMINI_API_KEY，將使用備用模式。")
             self.has_ai = False
 
-        # --- 2. 備用罵人語錄 (當 API 額度滿了或冷卻時使用) ---
-        self.targeted_roasts = {
-            "gta": "俠盜獵車手？🚗 這裡不是洛聖都，去努力工作吧！",
-            "nba": "玩 NBA 2K？🏀 手指動得比腳快有什麼用？去球場流汗！",
-            "league of legends": "又在打 LOL？💀 你的心態炸裂了嗎？",
-            "valorant": "特戰英豪？槍法再準，現實生活打不中目標有什麼用？",
-            "apex": "APEX？你的肝還好嗎？別再當滋崩狗了！",
-            "原神": "啟動？😱 給我把書桌前的燈啟動！"
-        }
+        # --- 備用語錄 (當 AI 掛掉時用) ---
         self.default_roasts = [
             "抓到了！{member} 竟然在玩 **{game}**！不用唸書/工作嗎？😡",
             "看到 {member} 在玩 **{game}**，曼巴精神去哪了？",
-            "嗶嗶！裁判！{member} 在玩 **{game}** 犯規！"
         ]
-
-        # --- 3. 榮譽關鍵字 ---
-        self.weak_words = ["累", "好累", "想睡", "放棄", "好難", "不想動", "休息", "明天再說", "擺爛"]
-        self.strong_words = ["健身", "訓練", "加班", "寫扣", "唸書", "拼了", "努力", "堅持", "搞定", "練球"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -57,40 +46,36 @@ class Game(commands.Cog):
             await db.commit()
 
     # ==========================================
-    # 🧠 AI 核心邏輯 (省流控制)
+    # 🧠 AI 核心：呼叫柯比 (含冷卻機制)
     # ==========================================
     async def ask_kobe(self, prompt, user_id, cooldown_dict, cooldown_time=30):
-        """呼叫 AI 生成回應，並帶有冷卻機制"""
         if not self.has_ai: return None
 
-        # 檢查冷卻 (避免短時間一直扣 API)
+        # 檢查冷卻
         now = time.time()
         if user_id in cooldown_dict:
             if now - cooldown_dict[user_id] < cooldown_time:
-                print(f"⏳ 用戶 {user_id} 觸發 AI 冷卻，跳過 API 呼叫。")
-                return None # 冷卻中，回傳 None 讓外部改用備用方案
+                return None 
         
-        # 更新冷卻時間
-        cooldown_dict[user_id] = now
+        cooldown_dict[user_id] = now # 更新冷卻
 
         try:
-            # 柯比的人設 Prompt
+            # 柯比人設
             system_prompt = (
                 "你現在是 Kobe Bryant (黑曼巴)。"
-                "你的個性：極度好勝、毒舌、嚴格、看不起找藉口的軟蛋、講話帶刺但有道理。"
-                "你的口頭禪：Mamba Out, Soft, What can I say。"
+                "個性：極度好勝、毒舌、痛恨軟弱、看不起找藉口的人。"
+                "口頭禪：Soft, Mamba Out, What can I say。"
                 "請用「繁體中文 (台灣)」回答。"
-                "回答要簡短有力 (50字以內)，可以兇，可以用 emoji (🏀🐍💀🔥)。"
-                f"使用者說/情況：{prompt}"
+                "回答要簡短有力 (50字內)，盡量兇，多用 emoji (🏀🐍💀🔥)。"
+                f"情況：{prompt}"
             )
             response = await asyncio.to_thread(self.model.generate_content, system_prompt)
             return response.text
-        except Exception as e:
-            print(f"❌ AI 錯誤: {e}")
+        except:
             return None
 
     # ==========================================
-    # 🎯 遊戲監控 (AI + 備用)
+    # 🎯 遊戲監控 (含賽後採訪)
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -99,21 +84,21 @@ class Game(commands.Cog):
         user_id = after.id
         new_game = next((a.name for a in after.activities if a.type == discord.ActivityType.playing), None)
         old_game = next((a.name for a in before.activities if a.type == discord.ActivityType.playing), None)
+        channel = self.get_text_channel(after.guild)
 
         if new_game == old_game: return
 
-        # A. 專注模式偷玩 (直接重罰，不用 AI)
+        # A. 專注模式偷玩 (重罰)
         if user_id in self.focus_sessions and new_game:
             task = self.focus_sessions.pop(user_id)
             task.cancel()
             await self.add_honor(user_id, -50)
-            channel = self.get_text_channel(after.guild)
             if channel:
                 await channel.send(f"🚨 **抓到了！騙子！**\n{after.mention} 專注時偷玩 **{new_game}**！榮譽 -50！😡")
                 if after.voice: await after.voice.disconnect()
             return
 
-        # B. 遊戲結束存檔
+        # B. 🎤 賽後毒舌記者會 (遊戲結束時觸發)
         if old_game:
             if user_id in self.active_sessions:
                 session = self.active_sessions[user_id]
@@ -121,26 +106,29 @@ class Game(commands.Cog):
                     duration = int(time.time() - session["start"])
                     await self.save_to_db(user_id, old_game, duration)
                     del self.active_sessions[user_id]
+                    
+                    # 只有玩超過 10 分鐘才採訪，避免洗版
+                    if duration > 600 and channel:
+                        mins = duration // 60
+                        prompt = f"{after.display_name} 剛玩了 {mins} 分鐘的 {old_game}。請像記者一樣質問他：這段時間學到了什麼？是不是在浪費生命？還是有進步？"
+                        interview_msg = await self.ask_kobe(prompt, user_id, self.ai_chat_cooldowns, cooldown_time=0) # 這裡不設冷卻，保證觸發
+                        if interview_msg:
+                            await channel.send(f"🎤 **賽後毒舌採訪** {after.mention}\n{interview_msg}")
 
-        # C. 遊戲開始 -> 罵人 (優先用 AI，冷卻時用備用)
+        # C. 遊戲開始 (AI 罵人 + 語音突襲)
         if new_game:
             self.active_sessions[user_id] = {"game": new_game, "start": time.time()}
-            channel = self.get_text_channel(after.guild)
             
-            # 1. 嘗試用 AI 生成罵人話 (冷卻 300秒 = 5分鐘)
-            # 這樣如果他開開關關遊戲刷頻，不會一直扣你的 API
-            roast_msg = await self.ask_kobe(f"這個人開始玩 {new_game} 了，罵他為什麼不去訓練。", user_id, self.ai_roast_cooldowns, cooldown_time=300)
+            # AI 生成罵人 (冷卻 5 分鐘)
+            roast_msg = await self.ask_kobe(f"這個軟蛋開始玩 {new_game} 了，罵他為什麼不去訓練。", user_id, self.ai_roast_cooldowns, cooldown_time=300)
             
-            # 2. 如果 AI 冷卻中或掛了，用備用字典
+            # 如果 AI 冷卻或失敗，用備用
             if not roast_msg:
-                game_lower = new_game.lower()
-                roast_text = next((text for kw, text in self.targeted_roasts.items() if kw in game_lower), None)
-                if not roast_text: roast_text = random.choice(self.default_roasts).format(member=after.mention, game=new_game)
-                roast_msg = f"{after.mention} {roast_text}"
+                roast_msg = random.choice(self.default_roasts).format(member=after.mention, game=new_game)
             else:
                 roast_msg = f"{after.mention} {roast_msg}"
 
-            # 3. 發送 (含語音突襲)
+            # 語音突襲
             if after.voice and after.voice.channel:
                 try:
                     vc = after.guild.voice_client
@@ -165,7 +153,7 @@ class Game(commands.Cog):
         return c or discord.utils.find(lambda x: x.permissions_for(guild.me).send_messages, guild.text_channels)
 
     # ==========================================
-    # 💬 聊天與榮譽 (含 AI 對話)
+    # 💬 聊天監控 (藉口粉碎機 + AI 對話)
     # ==========================================
     async def add_honor(self, user_id, amount):
         async with aiosqlite.connect(self.db_name) as db:
@@ -177,40 +165,63 @@ class Game(commands.Cog):
     async def on_message(self, message):
         if message.author.bot or message.content.startswith("!"): return
         user_id = message.author.id
+        content = message.content
 
-        # --- AI 對話功能 (被標記時觸發) ---
+        # --- 1. AI 對話 (被標記/回覆時觸發) ---
         if self.bot.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user):
             async with message.channel.typing():
-                # AI 對話冷卻 10 秒，避免被刷爆
-                reply = await self.ask_kobe(f"用戶對你說：{message.content}", user_id, self.ai_chat_cooldowns, cooldown_time=10)
+                # 冷卻 5 秒，可以像聊天一樣對話
+                reply = await self.ask_kobe(f"用戶對你說：{content}", user_id, self.ai_chat_cooldowns, cooldown_time=5)
                 if reply:
                     await message.reply(reply)
                 else:
-                    # 冷卻中或 AI 失敗的備用回應
                     await message.reply("別吵我，正在訓練。🏀 (冷卻中)")
-            return # 如果觸發對話，就不算榮譽加減分了
+            return 
 
-        # --- 榮譽系統 (關鍵字) ---
+        # --- 2. 🧠 智能藉口粉碎機 (被動監聽) ---
+        # 為了省額度，我們設定每人每 60 秒只能觸發一次「被動分析」
         now = time.time()
         if user_id in self.chat_cooldowns:
             if now - self.chat_cooldowns[user_id] < 60: return 
 
-        content = message.content.lower()
-        change, response = 0, ""
+        if self.has_ai:
+            try:
+                # 讓 AI 判斷這句話是軟弱還是強硬
+                prompt = (
+                    f"分析這句話：『{content}』\n"
+                    "如果是找藉口、偷懶、軟弱、想放棄，回答 'WEAK'。"
+                    "如果是努力、堅持、訓練、拼搏，回答 'STRONG'。"
+                    "如果是普通聊天，回答 'NORMAL'。"
+                    "只回答一個單字。"
+                )
+                response = await asyncio.to_thread(self.model.generate_content, prompt)
+                result = response.text.strip().upper()
+                
+                change = 0
+                comment_prompt = ""
 
-        if any(w in content for w in self.weak_words):
-            change, response = -2, "累了？軟蛋！😤"
-        elif any(w in content for w in self.strong_words):
-            change, response = 2, "這才是曼巴精神！🏀"
+                if "WEAK" in result:
+                    change = -5
+                    comment_prompt = f"使用者說『{content}』，他在找藉口。用 Kobe 語氣罵醒他。"
+                elif "STRONG" in result:
+                    change = 5
+                    comment_prompt = f"使用者說『{content}』，很有曼巴精神。用 Kobe 語氣肯定他。"
 
-        if change:
-            self.chat_cooldowns[user_id] = now
-            await self.add_honor(user_id, change)
-            color = 0x2ecc71 if change > 0 else 0xe74c3c
-            await message.channel.send(embed=discord.Embed(description=f"{message.author.mention} {response}", color=color))
+                if change != 0:
+                    self.chat_cooldowns[user_id] = now
+                    await self.add_honor(user_id, change)
+                    
+                    # 生成評語
+                    comment = await self.ask_kobe(comment_prompt, user_id, {}, cooldown_time=0) # 這裡不需額外冷卻
+                    
+                    color = 0x2ecc71 if change > 0 else 0xe74c3c
+                    embed = discord.Embed(description=f"{message.author.mention} {comment}\n(AI 判定榮譽值: `{change:+d}`)", color=color)
+                    await message.channel.send(embed=embed)
+
+            except: pass
 
     # ==========================================
-    # 📜 其他指令 (Focus, Checkin, Rank...) - 維持不變
+    # 📜 其他指令 (維持不變)
     # ==========================================
     @commands.command()
     async def focus(self, ctx, minutes: int):
