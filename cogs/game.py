@@ -31,9 +31,6 @@ class Game(commands.Cog):
         self.ai_chat_cooldowns = {}
         self.image_cooldowns = {}
         
-        # 🔥 新增：聊天熱度計數器 (用於自動插話)
-        self.chat_timestamps = [] 
-        
         # --- AI 設定 (Gemini 2.0 Flash) ---
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
@@ -41,17 +38,26 @@ class Game(commands.Cog):
                 genai.configure(api_key=api_key)
                 self.model = genai.GenerativeModel("gemini-2.0-flash")
                 self.has_ai = True
-                logger.info("✅ Gemini 2.0 Flash 啟動成功 (高互動模式)")
+                logger.info("✅ Gemini 2.0 Flash 啟動成功 (曼巴哲學家模式)")
             except Exception as e:
                 logger.error(f"AI 啟動失敗: {e}")
                 self.has_ai = False
         else:
+            logger.warning("⚠️ GEMINI_API_KEY 缺失，AI 備用模式")
             self.has_ai = False
 
-        # 關鍵字庫
-        self.weak_words = ["累", "好累", "想睡", "放棄", "休息", "不想動"]
-        self.strong_words = ["健身", "訓練", "加班", "努力", "寫扣", "唸書"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
+        # 關鍵字庫 (保留基本關鍵字，但回應邏輯已轉交給 AI)
+        self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
+        self.strong_words = ["健身", "訓練", "加班", "努力"]
+        
+        # 哲學語錄 (備用)
+        self.kobe_quotes = [
+            "低頭不是認輸，是要看清自己的路。",
+            "那些殺不死你的，只會讓你更強。",
+            "如果你害怕失敗，那你已經輸了。",
+            "重點不在於結果，而在於過程中的每一次呼吸。",
+            "痛苦是最好的老師，它告訴你哪裡還需要變強。"
+        ]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -72,7 +78,7 @@ class Game(commands.Cog):
         self.voice_check.cancel()
 
     # ==========================================
-    # 🧠 AI 核心：教練模式
+    # 🧠 AI 核心：哲學家模式 (Philosopher Mode)
     # ==========================================
     async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None):
         if not self.has_ai: return None
@@ -84,13 +90,15 @@ class Game(commands.Cog):
             cooldown_dict[user_id] = now
 
         try:
-            # 人設：教練模式
+            # 🔥 核心修改：哲學家與實踐者的人設
             sys_prompt = (
-                "你是 Kobe Bryant。個性：毒舌、嚴格、極度痛恨懶惰，但尊重渴望變強的人。\n"
-                "1. **問問題**：給出專業且實用的指導，但語氣要嚴厲。\n"
-                "2. **偷懶/藉口**：(例如說累、想放棄) 狠狠罵他，用激將法叫他去訓練。\n"
-                "3. **提到 NBA 2K**：暴怒，那是電子垃圾。\n"
-                "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
+                "你是 Kobe Bryant，現在的你是一位**籃球哲學家**與**實踐導師**。\n"
+                "你的目標：透過智慧、邏輯與曼巴精神，引導用戶解決問題，而不只是單純的謾罵。\n"
+                "行為準則：\n"
+                "1. **面對提問 (重要)**：必須給出**具體、實際且有深度**的解答。例如用戶問程式碼，你要指出邏輯錯誤；問人生，你要給出行動方針。回答要像一個嚴格但充滿智慧的導師。\n"
+                "2. **面對懶惰**：用**哲理性**的語言讓他感到羞愧，而不是用髒話。例如：「休息？棺材裡有的是時間休息。現在是創造傳奇的時候。」\n"
+                "3. **面對 NBA 2K**：表達出一種「恨鐵不成鋼」的遺憾，認為虛擬的勝利無法填補現實的空虛。\n"
+                "4. **語氣**：深沉、冷靜、一針見血。繁體中文(台灣)，50字內，多用 emoji (🧘‍♂️🐍🏀)。"
             )
             contents = [sys_prompt, f"用戶輸入：{prompt}"]
             if image: contents.append(image)
@@ -102,68 +110,42 @@ class Game(commands.Cog):
             return "ERROR"
 
     # ==========================================
-    # 💬 聊天監控 (高互動 + AI 罵人)
+    # 📸 圖片審判 (哲學視角)
     # ==========================================
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        if message.author.bot: return
+    async def analyze_image(self, image_url, user_id):
+        # ... (這裡沿用 Game class 的邏輯，只是 prompt 改變) ...
+        # 為了完整性，這裡重寫 analyze_image 邏輯以配合新 prompt
         
-        # 0. 指令優先：如果是指令 (!)，直接略過，讓 main.py 處理 (防止雙重回應)
-        if message.content.startswith('!'): return
+        async with self.cooldown_locks:
+            now = time.time()
+            if now - self.image_cooldowns.get(user_id, 0) < 60:
+                return "觀察需要時間。冷卻中...🧘‍♂️"
+            self.image_cooldowns[user_id] = now
 
-        user_id = message.author.id
-        content = message.content
-        now = time.time()
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                async with session.get(image_url) as resp:
+                    if resp.status != 200: return "圖像無法讀取，如同模糊的目標。🌫️"
+                    data = await resp.read()
 
-        # 1. 🔥 自動插話 (Chat Burst)
-        # 邏輯：如果 60 秒內有 10 則訊息，Bot 有機率插話
-        self.chat_timestamps.append(now)
-        self.chat_timestamps = [t for t in self.chat_timestamps if now - t < 60] # 只保留60秒內的紀錄
-        
-        if len(self.chat_timestamps) >= 10:
-            if random.random() < 0.2: # 20% 機率插話
-                self.chat_timestamps = [] # 重置計數
-                async with message.channel.typing():
-                    roast = await self.ask_kobe("群組聊天太熱烈了。毒舌插話：'你們有手指打字，沒力氣訓練？'")
-                    if roast and roast not in ["COOLDOWN", "ERROR"]:
-                        await message.channel.send(roast)
+            image = Image.open(io.BytesIO(data))
+            
+            # 使用哲學家 Prompt 進行圖片分析
+            reply = await self.ask_kobe(
+                prompt="觀察這張圖片。這反映了用戶什麼樣的生活態度？是自律的展現，還是放縱的證據？用哲學的角度點評他。",
+                user_id=user_id,
+                cooldown_dict=self.image_cooldowns,
+                cooldown_time=0, # 外層已檢查
+                image=image
+            )
+            return reply or "我看不到曼巴精神，只看到一張圖。🐍"
 
-        # 2. AI 對話 (被標記 或 ? 結尾)
-        is_mentioned = self.bot.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user) or message.content.strip().endswith("?")
-        
-        if is_mentioned:
-            async with message.channel.typing():
-                # 縮短對話冷卻到 3 秒，讓互動更流暢
-                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3)
-
-                if reply == "COOLDOWN":
-                    # 冷卻時不回話，或回個 emoji
-                    await message.add_reaction("🏀") 
-                elif reply == "ERROR":
-                    await message.reply("⚠️ AI 連線錯誤。")
-                elif reply:
-                    await message.reply(reply)
-                else:
-                    await message.reply(random.choice(self.kobe_quotes))
-            return
-
-        # 3. 🔥 AI 藉口粉碎機 (取代舊版固定回應)
-        if any(w in content for w in self.weak_words):
-            async with message.channel.typing():
-                # 讓 AI 生成罵人的話，而不是用固定的
-                roast = await self.ask_kobe(f"用戶說：'{content}'。他在找藉口。用最毒舌的方式罵醒他！", user_id, self.ai_chat_cooldowns, 10)
-                if roast and roast not in ["COOLDOWN", "ERROR"]:
-                    await message.reply(roast)
-                    await self.update_daily_stats(user_id, "lazy_points", 2)
-            return
-
-        # 4. 正向鼓勵 (維持固定，省資源)
-        if any(w in content for w in self.strong_words):
-            await message.channel.send(f"{message.author.mention} 這才是曼巴精神！🏀")
-            await self.add_honor(user_id, 2)
+        except Exception as e:
+            logger.error(f"圖片分析錯誤: {e}")
+            return random.choice(self.kobe_quotes)
 
     # ==========================================
-    # 🎯 遊戲監控 (維持原樣)
+    # 🎯 遊戲與狀態監控
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -172,32 +154,87 @@ class Game(commands.Cog):
         new_game = next((a.name for a in after.activities if a.type == discord.ActivityType.playing), None)
         old_game = next((a.name for a in before.activities if a.type == discord.ActivityType.playing), None)
         channel = self.get_text_channel(after.guild)
+
         now = time.time()
-        
         if user_id in self.cooldowns and now - self.cooldowns.get(user_id, 0) < 2: return
         self.cooldowns[user_id] = now 
 
+        # A. 遊戲開始
         if new_game and not old_game:
             self.active_sessions[user_id] = {"game": new_game, "start": time.time(), "1h_warned": False, "2h_warned": False}
-            prompt = f"這軟蛋開始玩 {new_game} 了。" + ("痛罵他玩2K" if "2k" in new_game.lower() else "罵他不去訓練")
-            roast = await self.ask_kobe(prompt, user_id, self.ai_roast_cooldowns, 300)
-            if channel: await channel.send(roast or f"{after.mention} 玩 **{new_game}**？不用唸書嗎？😡")
+            
+            prompt = f"用戶開始玩 {new_game} 了。"
+            if "2k" in new_game.lower():
+                prompt += "用哲學的角度告訴他，為何沉迷於虛擬的籃球無法讓他成為真正的傳奇。"
+            else:
+                prompt += "用反問句以此質問他：這真的是你現在該做的事嗎？"
 
+            roast_msg = await self.ask_kobe(prompt, user_id, self.ai_roast_cooldowns, 300)
+            if channel: await channel.send(roast_msg or f"{after.mention} {new_game}？你的時間就是這樣流逝的嗎？⏳")
+
+        # B. 遊戲結束
         elif old_game and not new_game:
             if user_id in self.active_sessions:
                 session = self.active_sessions[user_id]
                 duration = int(time.time() - session["start"])
                 await self.save_to_db(user_id, old_game, duration)
                 del self.active_sessions[user_id]
+                
                 if duration > 600 and channel:
-                    interview = await self.ask_kobe(f"{after.display_name} 玩了 {duration//60} 分鐘 {old_game}。質問他。", user_id, self.ai_chat_cooldowns, 0)
-                    if interview and interview != "COOLDOWN": await channel.send(f"🎤 **賽後採訪** {after.mention}\n{interview}")
+                    prompt = f"{after.display_name} 結束了 {duration//60} 分鐘的 {old_game}。請他反思這段時間獲得了什麼實質的成長。"
+                    interview = await self.ask_kobe(prompt, user_id, self.ai_chat_cooldowns, 0)
+                    if interview and interview != "COOLDOWN": 
+                        await channel.send(f"🎤 **靈魂拷問** {after.mention}\n{interview}")
 
     # ==========================================
-    # 資料庫與工具
+    # 💬 聊天監控
     # ==========================================
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot: return
+        user_id = message.author.id
+        content = message.content
+        
+        # 1. AI 對話 (被標記 或 ? 結尾)
+        is_mentioned = self.bot.user in message.mentions or (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user) or message.content.strip().endswith("?")
+        
+        if is_mentioned:
+            async with message.channel.typing():
+                # 直接將用戶內容傳給 ask_kobe，讓 Prompt 裡的規則去判斷是要回答問題還是要罵人
+                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 5)
+
+                if reply == "COOLDOWN":
+                    await message.reply("專注。別刷屏。🧘‍♂️")
+                elif reply == "ERROR":
+                    await message.reply("⚠️ 思緒中斷 (AI Error)。")
+                elif reply:
+                    await message.reply(reply)
+                else:
+                    await message.reply(random.choice(self.kobe_quotes))
+            return
+
+        # 2. 圖片審判 (如果有傳圖)
+        if message.attachments:
+             # 檢查是否為圖片
+            if any(message.attachments[0].content_type.startswith(t) for t in ["image/"]):
+                async with message.channel.typing():
+                    reply = await self.analyze_image(message.attachments[0].url, user_id)
+                    await message.reply(reply)
+                return
+
+        # 3. 關鍵字 (哲學版)
+        if any(w in content for w in self.weak_words):
+            # 這裡不一定要 AI，可以用隨機哲學語錄省額度
+            await message.channel.send(f"{message.author.mention} {random.choice(self.kobe_quotes)}")
+            await self.update_daily_stats(user_id, "lazy_points", 2)
+            
+        await self.bot.process_commands(message)
+
+    # ... (資料庫與 Tasks 保持不變，為節省篇幅省略，請保留原有的 save_to_db, update_daily_stats, send_warning 等函式) ...
+    # 請務必保留原有的 helper functions 和 tasks!
+    
     async def save_to_db(self, user_id, game_name, seconds):
-        if seconds < 10: return
+        if seconds < 5: return
         today = datetime.now().strftime('%Y-%m-%d')
         async with aiosqlite.connect(self.db_name) as db:
             await db.execute("INSERT OR REPLACE INTO playtime VALUES (?, ?, ?, ?)", (user_id, game_name, seconds, today))
@@ -212,18 +249,10 @@ class Game(commands.Cog):
             await db.execute(f"UPDATE daily_stats SET {column} = {column} + ? WHERE user_id = ?", (value, user_id))
             await db.commit()
 
-    async def add_honor(self, user_id, amount):
-        today = datetime.now().strftime('%Y-%m-%d')
-        async with aiosqlite.connect(self.db_name) as db:
-            await db.execute("INSERT OR IGNORE INTO honor (user_id, points) VALUES (?, 0)", (user_id,))
-            await db.execute("UPDATE honor SET points = points + ? WHERE user_id = ?", (amount, user_id))
-            await db.commit()
-
     def get_text_channel(self, guild):
         target = ["chat", "general", "聊天", "公頻"]
         return discord.utils.find(lambda x: any(t in x.name.lower() for t in target) and x.permissions_for(guild.me).send_messages, guild.text_channels) or guild.text_channels[0]
-    
-    # ... (遊戲時間監控 task 保持不變) ...
+
     @tasks.loop(minutes=1)
     async def game_check(self):
         now = time.time()
@@ -242,20 +271,18 @@ class Game(commands.Cog):
             member = guild.get_member(user_id)
             channel = self.get_text_channel(guild)
             if member and channel:
-                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎") or f"{member.mention} {time_str}了！眼睛不乾嗎？"
-                await channel.send(f"⚠️ **{time_str} 警報** {member.mention}\n{msg}")
+                prompt = f"用戶沉迷於 {game} 超過 {time_str}。用時間的哲學告訴他，這些逝去的光陰是無法贖回的。"
+                msg = await self.ask_kobe(prompt, user_id, {}, 0) or f"{member.mention} 時間不等人。你已經浪費了 {time_str}。"
+                await channel.send(f"⏳ **{time_str} 警報** {member.mention}\n{msg}")
                 await self.update_daily_stats(user_id, "lazy_points", penalty)
 
     @tasks.loop(hours=24)
     async def daily_tasks(self): pass
-    @tasks.loop(minutes=30)
-    async def random_mood(self): pass
     @tasks.loop(seconds=30)
     async def voice_check(self): pass
     
     @game_check.before_loop
     @daily_tasks.before_loop
-    @random_mood.before_loop
     @voice_check.before_loop
     async def before_loops(self):
         await self.bot.wait_until_ready()
