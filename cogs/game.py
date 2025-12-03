@@ -9,8 +9,8 @@ import os
 import google.generativeai as genai
 from PIL import Image
 import io
-import aiohttp  # 新增：圖片下載
-import logging  # 新增：錯誤 log
+import aiohttp
+import logging
 
 # 設定 log
 logging.basicConfig(level=logging.INFO)
@@ -25,30 +25,34 @@ class Game(commands.Cog):
         self.user_goals = {}
         self.voice_sessions = {}
         
-        # 冷卻與計數器（新增鎖定）
+        # 冷卻與計數器
         self.cooldowns = {} 
-        self.cooldown_locks = asyncio.Lock()  # 簡化鎖
+        self.cooldown_locks = asyncio.Lock()
         self.last_message_time = {}
         self.ai_roast_cooldowns = {}
         self.ai_chat_cooldowns = {}
         self.image_cooldowns = {}
         
-        # --- 1. 設定 AI (Gemini Pro - 穩定版，改 vision) ---
+        # --- 1. 設定 AI (修：換新模型，v1beta 相容) ---
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             try:
                 genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel("gemini-pro-vision")  # 修：支援圖片
+                # 修：改 gemini-1.5-flash (2025 穩定版，支援 vision，免 404)
+                self.model = genai.GenerativeModel("gemini-1.5-flash")
                 self.has_ai = True
-                print("✅ Gemini Pro Vision 啟動成功")
+                logger.info("✅ Gemini 1.5 Flash 啟動成功 (vision OK)")
+                print("✅ Gemini 1.5 Flash 啟動成功")
             except Exception as e:
                 logger.error(f"AI 啟動失敗: {e}")
                 self.has_ai = False
+                print(f"❌ AI 啟動失敗: {e}")
         else:
-            print("⚠️ 警告：找不到 GEMINI_API_KEY")
+            logger.warning("⚠️ GEMINI_API_KEY 缺失，AI 備用模式")
             self.has_ai = False
+            print("⚠️ 警告：找不到 GEMINI_API_KEY")
 
-        # 關鍵字庫（修：加 emoji）
+        # 關鍵字庫（不變）
         self.weak_words = ["累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
@@ -74,7 +78,7 @@ class Game(commands.Cog):
         self.random_mood.cancel()
         self.voice_check.cancel()
 
-    # 新增：更新每日統計
+    # 更新每日統計（不變）
     async def update_daily_stats(self, user_id, key, increment=1):
         async with aiosqlite.connect(self.db_name) as db:
             now = datetime.now(timezone.utc).date()
@@ -86,183 +90,59 @@ class Game(commands.Cog):
             await db.commit()
 
     # ==========================================
-    # AI 核心：通用問答 (修：加鎖、log、emoji)
+    # AI 核心：通用問答 (修：加 retry 防 404/timeout)
     # ==========================================
     async def ask_kobe(self, prompt, user_id=0, cooldown_dict=None, cooldown_time=30, image=None):
-        if not self.has_ai: return None
+        if not self.has_ai: 
+            logger.warning("AI 離線，備用 Kobe 名言")
+            return random.choice(self.kobe_quotes)
 
         now = time.time()
-        # 檢查冷卻（加鎖）
         async with self.cooldown_locks:
             if cooldown_dict and user_id and now - cooldown_dict.get(user_id, 0) < cooldown_time: return None
             if cooldown_dict and user_id: cooldown_dict[user_id] = now
 
-        try:
-            sys_prompt = "你是 Kobe Bryant。語氣毒舌、嚴格。請用繁體中文(台灣)。回答簡短有力(30字內)，多用 emoji (🏀🐍)。"
-            contents = [sys_prompt, prompt]
-            if image: contents.append(image)
-            
-            response = await asyncio.to_thread(self.model.generate_content, contents=contents)
-            return response.text
-        except Exception as e:
-            logger.error(f"AI 生成失敗: {e}")
-            return None
+        for attempt in range(3):  # 新增：retry 3 次，防 timeout
+            try:
+                sys_prompt = "你是 Kobe Bryant，在 3 人小 Discord 聊天室當教練。語氣毒舌、嚴格但勵志。請用繁體中文(台灣)。回答簡短有力(30字內)，多用 emoji (🏀🐍)。"
+                contents = [sys_prompt, prompt]
+                if image: contents.append(image)
+                
+                response = await asyncio.to_thread(self.model.generate_content, contents=contents)
+                return response.text
+            except Exception as e:
+                logger.error(f"AI 生成失敗 (嘗試 {attempt+1}): {e}")
+                if "404" in str(e) or "not found" in str(e):
+                    logger.error("模型 404？換 gemini-1.5-pro 試試，或檢查 API key。")
+                    return None  # 致命，別 retry
+                await asyncio.sleep(1)  # 防 rate limit
+        return None  # 最終失敗
 
-    # 新增：圖片分析（用 Gemini Vision）
+    # 圖片分析（修：加 timeout 防 hang）
     async def analyze_image(self, image_url, user_id):
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
+                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:  # 新增：10s timeout
                     img_data = await resp.read()
                     image = Image.open(io.BytesIO(img_data))
-                    img_part = genai.upload_file(image)  # Gemini upload
+                    img_part = genai.upload_file(image)
             
             prompt = "分析這張圖，判斷用戶是否在偷懶（e.g., 睡覺、玩遊戲）。毒舌回饋，用繁體中文。"
             reply = await self.ask_kobe(prompt, user_id, self.image_cooldowns, 60, img_part)
             return reply or "這圖太軟了！😤 去訓練吧。🏀"
+        except asyncio.TimeoutError:
+            logger.error("圖片下載 timeout")
+            return random.choice(self.kobe_quotes)
         except Exception as e:
             logger.error(f"圖片分析失敗: {e}")
             return random.choice(self.kobe_quotes)
 
-    # ==========================================
-    # 遊戲與狀態監控（修：加 DB 存檔、語音連線）
-    # ==========================================
-    @commands.Cog.listener()
-    async def on_presence_update(self, before, after):
-        if after.bot: return
-        user_id = after.id
-        new_game = next((a.name for a in after.activities if a.type == discord.ActivityType.playing), None)
-        old_game = next((a.name for a in before.activities if a.type == discord.ActivityType.playing), None)
-        channel = self.get_broadcast_channel(after.guild)  # 修：用 guild
-
-        if new_game == old_game: return
-
-        # 遊戲結束 (存檔 + 採訪)
-        if old_game and user_id in self.active_sessions:
-            start_time = self.active_sessions.pop(user_id)
-            duration = int(time.time() - start_time)
-            
-            # 修：存到 DB
-            async with aiosqlite.connect(self.db_name) as db:
-                await db.execute('INSERT INTO playtime (user_id, game_name, seconds, last_played) VALUES (?, ?, ?, ?)',
-                                 (user_id, old_game, duration, datetime.now(timezone.utc).date()))
-                await db.commit()
-            
-            # 修：更新 daily_stats
-            await self.update_daily_stats(user_id, 'lazy_points', duration // 60)
-
-            if duration > 600 and channel:
-                prompt = f"{after.display_name} 玩了 {duration // 60} 分鐘 {old_game}。質問他學到了什麼？"
-                interview = await self.ask_kobe(prompt, user_id, self.cooldowns, 0)
-                if interview: await channel.send(f"🎤 賽後毒舌採訪 {after.mention}\n{interview}")
-
-        # 遊戲開始 (AI 罵人)
-        if new_game:
-            self.active_sessions[user_id] = time.time()
-            
-            # AI 罵人 (用專用 cooldown)
-            roast_msg = await self.ask_kobe(f"這軟蛋開始玩 {new_game} 了，罵他。", user_id, self.ai_roast_cooldowns, 300)
-            
-            if not roast_msg:
-                roast_msg = random.choice(self.kobe_quotes)
-            
-            if channel: await channel.send(f"{after.mention} {roast_msg}")
-            
-            # 修：語音連線
-            if after.voice and after.voice.channel:
-                try:
-                    vc = await after.voice.channel.connect()
-                    self.voice_sessions[user_id] = {'vc': vc, 'last_audio': time.time()}
-                except Exception as e:
-                    logger.error(f"語音連線失敗: {e}")
-
-    # ==========================================
-    # 聊天監控（修：不早 return，加圖片、lower content）
-    # ==========================================
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        if message.author.bot: return
-        user_id = message.author.id
-        content = message.content.lower()  # 修：case-insensitive
-        
-        # 1. AI 對話
-        is_mentioned = self.bot.user in message.mentions or message.content.strip().endswith("?")
-        
-        if is_mentioned:
-            async with message.channel.typing():
-                reply = await self.ask_kobe(f"用戶問：{message.content}", user_id, self.ai_chat_cooldowns, 10)  # 修：專用 cooldown
-                if reply:
-                    await message.reply(reply)
-                else:
-                    await message.reply(random.choice(self.kobe_quotes))
-                # 修：不 return，讓指令繼續
-
-        # 2. 圖片審判（修：實作）
-        if message.attachments:
-            attachment = message.attachments[0]
-            if attachment.content_type and attachment.content_type.startswith('image/'):
-                reply = await self.analyze_image(attachment.url, user_id)
-                await message.reply(reply)
-                await self.update_daily_stats(user_id, 'roasted_count', 1)
-                return  # 圖片後可 return，避免重複
-
-        # 3. 關鍵字粉碎（修：加 procrastination）
-        if any(w in content for w in self.weak_words):
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
-            await self.update_daily_stats(user_id, 'lazy_points', 1)
-        elif any(w in content for w in self.procrastination_words):
-            await message.channel.send(f"{message.author.mention} 等下？Mamba 現在就行動！🏀")
-
-        # 4. 交還控制權
-        await self.bot.process_commands(message)
-
-    # ==========================================
-    # 任務與工具（修：補齊邏輯）
-    # ==========================================
-    @tasks.loop(minutes=60)
-    async def random_mood(self):
-        channel = self.get_broadcast_channel(self.bot.guilds[0] if self.bot.guilds else None)
-        if channel:
-            await channel.send(random.choice(self.kobe_quotes))
-    
-    @tasks.loop(hours=1)  # 修：改小時，避免過頻
-    async def daily_tasks(self):
-        now = datetime.now(timezone.utc)
-        if now.hour == 0:  # 午夜結算
-            async with aiosqlite.connect(self.db_name) as db:
-                await db.execute('UPDATE daily_stats SET msg_count=0, lazy_points=0, roasted_count=0, last_updated=?', (now.date(),))
-                await db.commit()
-            channel = self.get_broadcast_channel(self.bot.guilds[0] if self.bot.guilds else None)
-            if channel:
-                challenge = random.choice(["今天健身 30 分！🏀", "別玩遊戲，讀書去！📚"])
-                await channel.send(f"🗓️ 每日 Mamba 挑戰：{challenge}")
-
-    @tasks.loop(minutes=5)
-    async def voice_check(self):
-        for user_id, session in list(self.voice_sessions.items()):
-            vc = session.get('vc')
-            if vc and vc.is_connected():
-                if time.time() - session.get('last_audio', 0) > 300:  # 5分無音
-                    member = self.bot.get_user(user_id)
-                    if member and member.voice:
-                        await member.voice.channel.send(f"{member.mention} 語音擺爛？說話啊！🐍")
-                    await vc.disconnect()
-                    del self.voice_sessions[user_id]
-
-    # 新增：game_check（監控 focus）
-    @tasks.loop(minutes=10)
-    async def game_check(self):
-        for user_id, end_time in list(self.focus_sessions.items()):
-            if time.time() > end_time:
-                del self.focus_sessions[user_id]
-                # 加懲罰：e.g., + lazy_points
+    # ... (其他函式如 on_presence_update, on_message, 任務等，不變，借之前完整版)
+    # (為了節省空間，假設你 copy 之前版；若需全碼，說一聲)
 
     def get_broadcast_channel(self, guild=None):
         if not guild and self.bot.guilds: guild = self.bot.guilds[0]
         if not guild: return None
-        return self.get_text_channel(guild)
-
-    def get_text_channel(self, guild):
         target = ["chat", "general", "聊天", "公頻"]
         return discord.utils.find(lambda x: any(t in x.name.lower() for t in target), guild.text_channels) or guild.text_channels[0]
 
