@@ -9,9 +9,8 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # ==========================================
-# 👇 您之前可能不小心刪掉的部分 (定義 bot) 👇
+# 核心設定：關閉預設 Help，開啟所有權限
 intents = discord.Intents.all()
-# 加入 help_command=None 以關閉預設的醜介面
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 # ==========================================
 
@@ -21,20 +20,22 @@ async def on_ready():
     print('------')
 
 async def load_extensions():
-    # 確保 cogs 資料夾存在
+    # 載入 cogs 資料夾裡的所有模組
     if os.path.exists('./cogs'):
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py'):
-                await bot.load_extension(f'cogs.{filename[:-3]}')
+                try:
+                    await bot.load_extension(f'cogs.{filename[:-3]}')
+                except Exception as e:
+                    print(f'無法載入 {filename}: {e}')
     else:
         print("找不到 cogs 資料夾，跳過載入模組。")
 
 async def main():
     async with bot:
-        keep_alive()  # 啟動網頁伺服器 (騙過 Render)
+        keep_alive()  # 啟動網頁伺服器 (保持 Render 運作)
         await load_extensions()
         
-        # 檢查 Token 是否存在
         if not TOKEN:
             print("錯誤：找不到 Token，請檢查 Render 環境變數！")
             return
@@ -46,4 +47,3 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-
