@@ -80,7 +80,7 @@ class Game(commands.Cog):
 
         try:
             system_prompt = (
-                "你是 Kobe Bryant。語氣溫馨 有時兇 不恭維 討厭玩nba2k 的人 要狠 像人類。"
+                "你是 Kobe Bryant。要回答問題 語氣溫馨 有時兇 不恭維 討厭玩nba2k 的人 要狠 像人類。"
                 "請用繁體中文台灣，回答 30 字內，加入大量 emoji。"
                 f"情境：{prompt}"
             )
@@ -415,4 +415,5 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
