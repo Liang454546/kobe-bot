@@ -12,7 +12,7 @@ class Game(commands.Cog):
         self.db_name = "mamba_system.db"
         self.active_sessions = {} # 記錄正在玩遊戲的人 (計時用)
         self.focus_sessions = {}  # 記錄正在專注的人 (監控用)
-        self.chat_cooldowns = {}  # 🔥 新增：聊天獎勵冷卻 {user_id: timestamp}
+        self.chat_cooldowns = {}  # 聊天獎勵冷卻
         
         # --- 1. 遊戲罵人語錄 ---
         self.targeted_roasts = {
@@ -43,7 +43,7 @@ class Game(commands.Cog):
             await db.commit()
 
     # ==========================================
-    # 🎯 核心監控邏輯 (專注 + 遊戲罵人 + 紀錄)
+    # 🎯 核心監控邏輯
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -63,6 +63,7 @@ class Game(commands.Cog):
             
             channel = self.get_text_channel(after.guild)
             if channel:
+                # 移除 tts=True，只傳送文字
                 await channel.send(f"🚨 **抓到了！騙子！**\n{after.mention} 說要專注，結果偷偷打開了 **{new_game}**！\n**修煉失敗！榮譽值重扣 50 分！** 😡👎")
                 if after.voice:
                     await after.voice.disconnect()
@@ -91,6 +92,7 @@ class Game(commands.Cog):
 
             channel = self.get_text_channel(after.guild)
             
+            # 語音突襲邏輯 (只進語音發文字，不發出聲音)
             if after.voice and after.voice.channel:
                 try:
                     vc = after.guild.voice_client
@@ -98,9 +100,8 @@ class Game(commands.Cog):
                     elif vc.channel != after.voice.channel: await vc.move_to(after.voice.channel)
                     
                     if channel:
-                        tts = f"喂！{after.display_name}！我抓到你在偷玩 {new_game}！專心一點！"
-                        await channel.send(tts, tts=True)
-                        await channel.send(f"🎙️ **語音查哨突襲！**\n{roast_msg}")
+                        # 這裡移除了 tts=True
+                        await channel.send(f"🎙️ **語音查哨突襲！**\n喂！{after.display_name}！我抓到你在偷玩 {new_game}！專心一點！\n{roast_msg}")
                 except: pass
             else:
                 if channel: await channel.send(roast_msg)
@@ -176,13 +177,10 @@ class Game(commands.Cog):
     async def on_message(self, message):
         if message.author.bot or message.content.startswith("!"): return
         
-        # 1. 檢查是否在冷卻中
         user_id = message.author.id
         now = time.time()
         if user_id in self.chat_cooldowns:
-            # 冷卻時間 60 秒
-            if now - self.chat_cooldowns[user_id] < 60:
-                return 
+            if now - self.chat_cooldowns[user_id] < 60: return 
 
         content = message.content.lower()
         change, response = 0, ""
@@ -193,9 +191,7 @@ class Game(commands.Cog):
             change, response = 2, random.choice(self.strong_encourage)
 
         if change:
-            # 觸發成功，更新冷卻時間
             self.chat_cooldowns[user_id] = now
-            
             await self.add_honor(user_id, change)
             color = 0x2ecc71 if change > 0 else 0xe74c3c
             await message.channel.send(embed=discord.Embed(description=f"{message.author.mention} {response}", color=color))
