@@ -1,7 +1,16 @@
-discord.py
-python-dotenv
-aiosqlite
-Flask
-PyNaCl
-google-generativeai>=0.8.3
-pillow
+# Kobe Bot 依賴清單：曼巴訓練營，永不軟！
+# 安裝：pip install -r requirements.txt
+# 聲明：2025/12/03 版本，穩定為主
+
+discord.py[voice]==2.4.0  # Bot 核心 + 語音 (含 PyNaCl)
+python-dotenv==1.0.1      # .env 載入 token
+aiosqlite==0.20.0         # Async SQLite DB (stats/honor)
+Flask==3.0.3              # Keep Alive web 伺服器 (Render 防 sleep)
+aiohttp==3.10.5           # 新增：Async HTTP (圖片下載/分析)
+PyNaCl==1.5.0             # 語音加密 (discord.py[voice] 依賴，但顯式)
+google-generativeai>=0.8.3  # Gemini AI (毒舌 roast)
+Pillow==11.1.0            # 圖片處理 (PIL for Gemini vision)
+
+# 選配：若加 TTS 或其他
+# pyttsx3==2.91  # TTS Kobe 名言 (語音 roast)
+# requests==2.31.0  # 若需 sync HTTP
