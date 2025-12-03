@@ -1,8 +1,8 @@
 import discord
+from discord.ext import commands
 import os
 import asyncio
 import logging
-from discord.ext import commands
 from dotenv import load_dotenv
 from keep_alive import keep_alive, auto_ping
 
@@ -13,21 +13,21 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 設定權限
+# 設定權限 (Intents)
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.members = True
+# 🔥 關鍵修改：必須開啟這個，才能讀取大家是在玩遊戲還是發呆
+intents.presences = True 
 
-# 🔥 關鍵修正 1：加上 help_command=None
-# 這會關閉 Discord 醜醜的預設選單，讓您的 cogs/help.py 能夠生效 (支援 !h)
+# 關閉預設 Help
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
-    # 建議在啟動後載入 Cogs
     await load_cogs()
-    logger.info(f"【{bot.user} 已上線】曼巴時刻啟動！")
+    print(f"【{bot.user} 已上線】曼巴時刻啟動！")
 
 async def load_cogs():
     if os.path.exists("./cogs"):
@@ -45,10 +45,8 @@ async def main():
         return
         
     async with bot:
-        # 啟動網頁伺服器 (Keep Alive)
         keep_alive()
         auto_ping()
-        
         await bot.start(TOKEN)
 
 if __name__ == "__main__":
