@@ -1,10 +1,10 @@
-# Kobe Bot 依賴：修 audioop + 最新版
-discord.py[voice]==2.6.4  # 最新，3.13 fallback + 語音
+# Kobe Bot 依賴：修 audioop 坑 + 最新 fallback
+discord.py[voice]==2.6.4  # 升級：內建 audioop fallback (3.12/3.13 OK)
 python-dotenv==1.0.1
 aiosqlite==0.20.0
 Flask==3.0.3
 aiohttp==3.10.5
-PyNaCl==1.5.0  # 語音加密
+PyNaCl==1.5.0  # 語音加密 (discord.py 依賴)
 google-generativeai>=0.8.3
 Pillow==11.1.0
-audioop-lts==0.1  # 新增：3.13 回血 (若不降級用)
+# 移除 audioop-lts：用 discord fallback 穩
