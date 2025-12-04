@@ -98,7 +98,7 @@ class Game(commands.Cog):
         try:
             sys_prompt = (
                 "你是 Kobe Bryant。個性：溫馨 不恭維 現實 專業 回答問題 。\n"
-                "1. **音樂審判**：用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。\n"
+                "1. **音樂審判**：要提出歌名 並分析用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。\n"
                 "2. **錯字/邏輯/廢話**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
                 "4. 繁體中文(台灣)，30字內，多用 emoji 。"
@@ -148,7 +148,7 @@ class Game(commands.Cog):
         if new_spotify and (not old_spotify or new_spotify.track_id != old_spotify.track_id):
             # 🔥 100% 機率觸發
             if random.random() < 1.0: 
-                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。"
+                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。要提出歌名 並分析用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。"
                 
                 # 🔥 關鍵修改：cooldown_dict 傳入空字典 {}，cooldown_time 設為 0
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
@@ -369,3 +369,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
