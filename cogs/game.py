@@ -18,6 +18,8 @@ class Game(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_name = "mamba_system.db"
+        
+        # 狀態儲存
         self.active_sessions = {}
         self.pending_replies = {}
         self.processed_msg_ids = set() 
@@ -26,6 +28,7 @@ class Game(commands.Cog):
         self.last_chat_time = {} 
         self.last_music_processed = {}
         
+        # 冷卻系統
         self.cooldowns = {} 
         self.cooldown_locks = asyncio.Lock()
         self.ai_roast_cooldowns = {}
@@ -43,12 +46,12 @@ class Game(commands.Cog):
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
         self.sys_prompt_template = (
-            "你是 Kobe Bryant。個性：友善真實、不恭維、專業、現實、專注於問題。\n"
+            "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
             "2. **對話**：如果這是連續對話，請參考前文回答。\n"
             "3. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名。\n"
             "4. **錯字/邏輯**：嚴厲糾正。\n"
-            "5. 繁體中文(台灣)，30字內，多用 emoji 。"
+            "5. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
         )
 
     async def cog_load(self):
@@ -182,7 +185,7 @@ class Game(commands.Cog):
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
     # ==========================================
-    # 💬 聊天監控 (修復雙重回覆問題)
+    # 💬 聊天監控 (修復：單問號不觸發)
     # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -212,22 +215,23 @@ class Game(commands.Cog):
                 if not member.bot and member.status == discord.Status.online and member.id != user_id:
                     self.pending_replies[member.id] = {'time': time.time(), 'channel': message.channel, 'mention_by': message.author}
 
-        # 🔥 重構邏輯：使用 if-elif-else 確保只觸發一種回應
-        is_question = content.endswith(("?", "？"))
+        # 🔥 重構判斷邏輯：
+        # 1. 偵測問號：必須以 ? 結尾 且 長度大於 1 (防止只打一個 ? 就回)
+        is_question = content.endswith(("?", "？")) and len(content) > 1
         is_mentioned = self.bot.user in message.mentions
         has_image = message.attachments and any(message.attachments[0].content_type.startswith(t) for t in ["image/"])
         has_toxic = any(w in content for w in self.toxic_words)
         has_weak = any(w in content for w in self.weak_words)
 
-        # 1. 優先處理圖片 (如果 Tag 機器人 + 圖片，視為圖片審判)
+        # 優先順序 1: 圖片 (Tag 或機率)
         if has_image:
-            if is_mentioned or random.random() < 0.1: # 10% 機率 or 主動 Tag
+            if is_mentioned or random.random() < 0.1:
                 async with message.channel.typing():
                     reply = await self.analyze_image(message.attachments[0].url, user_id)
                     await message.reply(reply)
             return
 
-        # 2. AI 對話 (Tag 或 問號)
+        # 優先順序 2: AI 對話 (Tag 或 有意義的問句)
         elif is_mentioned or is_question:
             async with message.channel.typing():
                 reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3, use_memory=True)
@@ -236,14 +240,14 @@ class Game(commands.Cog):
                 elif reply: await message.reply(reply)
             return
 
-        # 3. 負能量
+        # 優先順序 3: 負能量
         elif has_toxic:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"用戶說：'{content}'。他在散播失敗主義。狠狠罵他。", user_id, self.ai_chat_cooldowns, 30)
                 if roast and "⚠️" not in str(roast) and roast != "COOLDOWN": await message.reply(roast)
             return
 
-        # 4. 細節糾察 (20% 機率)
+        # 優先順序 4: 細節糾察
         elif len(content) > 10 and random.random() < 0.2:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"檢查這句話有無錯字邏輯：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
@@ -251,7 +255,7 @@ class Game(commands.Cog):
                     await message.reply(f"📝 **細節糾察**\n{roast}")
             return
 
-        # 5. 關鍵字
+        # 優先順序 5: 關鍵字
         elif has_weak:
             await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
