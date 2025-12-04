@@ -116,7 +116,7 @@ class Voice(commands.Cog):
         await voice_client.disconnect()
 
     # ========================================
-    # 自動進語音（有人進就跟進）
+    # 自動進語音（修正版：只進不出）
     # ========================================
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -130,16 +130,10 @@ class Voice(commands.Cog):
 
             voice_channel = after.channel
             try:
+                # 修正：移除閃現進場，改為持續連接
                 vc = await voice_channel.connect()
-                await asyncio.sleep(1)
-                await vc.disconnect()  # 閃現一下就跑（經典曼巴式進場）
-                await asyncio.sleep(2)
-                vc = await voice_channel.connect()
+                # 這裡可以加播放音效，如果需要的話
                 
-                # 進場語音（可選：播音檔）
-                # if vc.is_connected():
-                #     vc.play(discord.FFmpegPCMAudio("mamba.mp3"))
-                    
             except Exception as e:
                 logger.error(f"語音連接失敗: {e}")
 
@@ -154,6 +148,7 @@ class Voice(commands.Cog):
                 continue
                 
             members = [m for m in vc.channel.members if not m.bot]
+            # 如果沒人了，才離開
             if len(members) == 0:
                 await vc.disconnect()
 
