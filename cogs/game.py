@@ -95,11 +95,11 @@ class Game(commands.Cog):
 
         try:
             sys_prompt = (
-                "你是 Kobe Bryant。個性：毒舌、嚴格、偏執於細節。\n"
-                "1. **音樂審判**：評論用戶的音樂品味。如果軟弱就罵，如果硬派就稱讚。\n"
-                "2. **錯字/邏輯**：嚴厲糾正。\n"
+                "你是 Kobe Bryant。個性：不要一直提籃球 要專業 回答問題  。\n"
+                "1. **音樂審判**：評論用戶的音樂品味。稱讚。\n"
+                "2. **錯字/邏輯/廢話**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
-                "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
+                "4. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
             )
             contents = [sys_prompt, f"情境：{prompt}"]
             if image: contents.append(image)
@@ -152,9 +152,9 @@ class Game(commands.Cog):
 
             if song:
                 # 只有 50% 機率觸發，避免太煩
-                if random.random() < 0.5:
+                if random.random() < 1:
                     prompt = f"用戶開始聽歌：《{song}》 by {artist}。請毒舌分析這個音樂品味，並給出專業評估。"
-                    roast = await self.ask_kobe(prompt, user_id, self.status_cooldowns, 180) # 3分鐘冷卻
+                    roast = await self.ask_kobe(prompt, user_id, self.status_cooldowns, 10) # 3分鐘冷卻
 
                     if channel and roast and roast != 'COOLDOWN':
                         await channel.send(f"🎵 **音樂偵測** {after.mention}\n{roast}")
@@ -167,7 +167,7 @@ class Game(commands.Cog):
             if song and channel:
                 # 只有 20% 機率觸發
                 if random.random() < 0.2:
-                    prompt = f"用戶停止聽《{song}》。請分析他為什麼放棄這首歌，並做出心理層面的毒舌判斷。"
+                    prompt = f"用戶停止聽《{song}》。請分析他為什麼放棄這首歌，並做出心理層面的判斷。"
                     roast = await self.ask_kobe(prompt, user_id, self.status_cooldowns, 180)
 
                     if roast and roast != 'COOLDOWN':
@@ -221,7 +221,7 @@ class Game(commands.Cog):
             return
 
         # 3. 細節糾察 (20% 機率)
-        if len(content) > 10 and random.random() < 0.2:
+        if len(content) > 10 and random.random() < 0.7:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"檢查這句話有無錯字邏輯：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
                 if roast and "PASS" not in roast and roast != "COOLDOWN" and roast != "ERROR":
@@ -399,3 +399,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
