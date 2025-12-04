@@ -70,14 +70,14 @@ class Game(commands.Cog):
         
         self.daily_tasks.start()
         self.game_check.start()
-        # self.voice_check.start() # 🔥 已移除靜音糾察
+        # self.voice_check.start() # 已移除
         self.ghost_check.start()
         await self.bot.wait_until_ready()
 
     async def cog_unload(self):
         self.daily_tasks.cancel()
         self.game_check.cancel()
-        # self.voice_check.cancel() # 🔥 已移除
+        # self.voice_check.cancel() # 已移除
         self.ghost_check.cancel()
 
     def get_text_channel(self, guild):
@@ -144,9 +144,7 @@ class Game(commands.Cog):
             return reply or "我看不到曼巴精神。🐍"
         except: return random.choice(self.kobe_quotes)
 
-    # ==========================================
-    # 🎯 狀態監控
-    # ==========================================
+    # 狀態監控
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
         if after.bot: return
@@ -186,16 +184,14 @@ class Game(commands.Cog):
                                  (user_id, new_spotify.title, new_spotify.artist, time.time()))
                 await db.commit()
 
-            # 🔥 機率 20%
+            # 機率 20%
             if random.random() < 0.2: 
                 prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析為什麼聽這首歌 以及分析歌詞與歌名 要提及歌名。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
                 if channel and roast and "⚠️" not in str(roast) and roast != "COOLDOWN":
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
-    # ==========================================
-    # 💬 聊天監控
-    # ==========================================
+    # 聊天監控
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
@@ -407,6 +403,7 @@ class Game(commands.Cog):
         tz = timezone(timedelta(hours=8))
         now = datetime.now(tz)
         if now.hour == 23 and now.minute == 59:
+            # 🔥 改用指定頻道
             channel = self.get_text_channel(self.bot.guilds[0]) if self.bot.guilds else None
             if not channel: return
             async with aiosqlite.connect(self.db_name) as db:
@@ -432,6 +429,7 @@ class Game(commands.Cog):
                 embed = discord.Embed(title="📰 曼巴日報", description=news, color=0xe74c3c)
                 await channel.send(embed=embed)
 
+            # 🔥 清空今日戰績
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("DELETE FROM daily_stats")
                 await db.execute("DELETE FROM playtime") # 🔥 清空每日遊戲時間
@@ -439,7 +437,7 @@ class Game(commands.Cog):
     
     @game_check.before_loop
     @daily_tasks.before_loop
-    @voice_check.before_loop
+    # @voice_check.before_loop # 🔥 已移除
     @ghost_check.before_loop
     async def before_loops(self): await self.bot.wait_until_ready()
 
