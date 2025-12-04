@@ -99,7 +99,7 @@ class Game(commands.Cog):
 
         try:
             sys_prompt = (
-                "你是 Kobe Bryant。個性 真實 不恭維 善用心理學。\n"
+                "你是 Kobe Bryant但不提籃球有關的。個性 真實 不恭維 善用心理學。\n"
                 "1. **音樂審判**：用心理學分析歌明以及歌詞 不恭維 真實 要提及歌名。\n"
                 "2. **錯字/邏輯**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
@@ -454,4 +454,5 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
