@@ -152,9 +152,9 @@ class Game(commands.Cog):
 
             if song:
                 # 只有 50% 機率觸發，避免太煩
-                if random.random() < 1:
-                    prompt = f"用戶開始聽歌：《{song}》 by {artist}。請毒舌分析這個音樂品味，並給出專業評估。"
-                    roast = await self.ask_kobe(prompt, user_id, self.status_cooldowns, 10) # 3分鐘冷卻
+                if random.random() < 1.0:
+                    prompt = f"用戶開始聽歌：《{song}》 by {artist}。請用心理學分析這個音樂品味，並給出專業評估。"
+                    roast = await self.ask_kobe(prompt, user_id, self.status_cooldowns, 1) # 3分鐘冷卻
 
                     if channel and roast and roast != 'COOLDOWN':
                         await channel.send(f"🎵 **音樂偵測** {after.mention}\n{roast}")
@@ -399,4 +399,5 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
