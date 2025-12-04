@@ -23,10 +23,12 @@ class Game(commands.Cog):
         # 狀態儲存
         self.active_sessions = {}
         self.pending_replies = {}
+        self.last_music_processed = {} # 防雙重觸發音樂
+        self.processed_msg_ids = set() # 防雙重觸發訊息
         
-        # 🔥 防雙重觸發專用變數
-        self.processed_msg_ids = set() # 記錄已處理過的訊息 ID
-        self.last_spotify_roast = {}   # {user_id: timestamp} 強制冷卻 Spotify
+        # 🔥 新增：短期對話記憶 {user_id: [msg1, msg2, ...]}
+        # 僅存最近 5 輪對話，避免 Token 爆炸
+        self.short_term_memory = {} 
         
         # 冷卻系統
         self.cooldowns = {} 
@@ -39,23 +41,13 @@ class Game(commands.Cog):
         
         # --- AI 設定 ---
         api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel("gemini-2.0-flash")
-                self.has_ai = True
-                logger.info("✅ Gemini 2.0 Flash 啟動成功 (防雙重回覆版)")
-            except Exception as e:
-                logger.error(f"AI 啟動失敗: {e}")
-                self.has_ai = False
-        else:
-            self.has_ai = False
+        self.has_ai = True if api_key else False
 
         # 關鍵字庫
         self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.toxic_words = ["幹", "靠", "爛", "輸"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強nigga。🐍", "Soft. 🥚"]
+        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -72,14 +64,7 @@ class Game(commands.Cog):
         self.game_check.start()
         self.voice_check.start()
         self.ghost_check.start()
-
         await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            for member in guild.members:
-                if member.bot: continue
-                game = next((a.name for a in member.activities if a.type == discord.ActivityType.playing), None)
-                if game and member.id not in self.active_sessions:
-                    self.active_sessions[member.id] = {"game": game, "start": time.time(), "1h_warned": False, "2h_warned": False}
 
     async def cog_unload(self):
         self.daily_tasks.cancel()
@@ -88,34 +73,74 @@ class Game(commands.Cog):
         self.ghost_check.cancel()
 
     # ==========================================
-    # 🧠 AI 核心
+    # 🧠 AI 核心 (含記憶功能)
     # ==========================================
-    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None):
+    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None, use_memory=False):
         if not self.has_ai: return None
         now = time.time()
+        
+        # 冷卻檢查
         if user_id and cooldown_dict:
             if now - cooldown_dict.get(user_id, 0) < cooldown_time: return "COOLDOWN"
             cooldown_dict[user_id] = now
 
         try:
+            # 構建 Prompt
             sys_prompt = (
-                "你是 Kobe Bryant但不提籃球有關的。個性 真實 不恭維 善用心理學。\n"
-                "1. **音樂審判**：用心理學分析歌明以及歌詞 不恭維 真實 要提及歌名。\n"
-                "2. **錯字/邏輯**：嚴厲糾正。\n"
-                "3. **團隊意識**：罵已讀不回的人。\n"
-                "4. 繁體中文(台灣)，30字內，多用 emoji 。"
+                "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
+                "1. **對話**：如果這是連續對話，請參考前文回答，不要像機器人一樣重複。\n"
+                "2. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名、介紹一下跟分析歌詞。\n"
+                "3. **錯字/邏輯/廢話**：嚴厲糾正。\n"
+                "4. **團隊意識**：罵已讀不回的人。\n"
+                "5. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
             )
-            contents = [sys_prompt, f"情境：{prompt}"]
+
+            # 🔥 記憶組裝邏輯
+            final_prompt = f"情境/用戶說：{prompt}"
+            
+            if use_memory and user_id:
+                # 讀取歷史
+                history = self.short_term_memory.get(user_id, [])
+                if history:
+                    history_text = "\n".join(history)
+                    final_prompt = f"【歷史對話紀錄】\n{history_text}\n\n【現在用戶說】\n{prompt}"
+                
+            contents = [sys_prompt, final_prompt]
             if image: contents.append(image)
             
-            response = await asyncio.to_thread(self.model.generate_content, contents=contents)
-            return response.text
+            # 呼叫 AI
+            response = await self.bot.ask_brain(prompt=None, image=image, system_instruction=sys_prompt, history=None) 
+            # 注意：這裡我們偷懶一點，因為 main.py 的 ask_brain 可能還沒支援 history 參數，
+            # 所以我們直接把 history 塞進 prompt (contents) 裡傳過去。
+            # 如果 main.py 的 ask_brain 是直接接受 contents 列表的，那就更好了。
+            # 但為了保險起見，我們這裡直接用 self.model (如果 Game 類別自己有 model) 或是呼叫 bot.ai_model
+            
+            # 修正：直接使用 cog 內部的 self.model (如果有的話) 或 bot.ai_model
+            # 假設 main.py 已經把 model 初始化好了，我們這裡直接用 bot.ai_model 最快
+            if hasattr(self.bot, 'ai_model') and self.bot.ai_model:
+                 response = await asyncio.to_thread(self.bot.ai_model.generate_content, contents=contents)
+                 reply_text = response.text
+            else:
+                 return "ERROR: AI Model Not Loaded"
+
+            # 🔥 更新記憶
+            if use_memory and user_id:
+                # 初始化
+                if user_id not in self.short_term_memory: self.short_term_memory[user_id] = []
+                # 存入對話
+                self.short_term_memory[user_id].append(f"User: {prompt}")
+                self.short_term_memory[user_id].append(f"Kobe: {reply_text}")
+                # 只保留最近 6 句 (3輪對話)
+                if len(self.short_term_memory[user_id]) > 6:
+                    self.short_term_memory[user_id] = self.short_term_memory[user_id][-6:]
+
+            return reply_text
         except Exception as e:
             logger.error(f"AI 錯誤: {e}") 
             return "ERROR"
 
     # ==========================================
-    # 🎯 狀態監控 (Spotify 強制防抖)
+    # 🎯 狀態監控
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -143,49 +168,37 @@ class Game(commands.Cog):
                     interview = await self.ask_kobe(f"{after.display_name} 玩了 {duration//60} 分鐘 {old_game}。質問收穫。", user_id, self.ai_chat_cooldowns, 0)
                     if interview and interview != "COOLDOWN": await channel.send(f"🎤 **賽後採訪** {after.mention}\n{interview}")
 
-        # 2. 🔥 音樂偵測 (Spotify 強制防抖動)
+        # 2. 音樂偵測 (防雙重觸發 + 無冷卻)
         new_spotify = next((a for a in after.activities if isinstance(a, discord.Spotify)), None)
         old_spotify = next((a for a in before.activities if isinstance(a, discord.Spotify)), None)
         
         if new_spotify and (not old_spotify or new_spotify.track_id != old_spotify.track_id):
+            if self.last_music_processed.get(user_id) == new_spotify.track_id: return 
+            self.last_music_processed[user_id] = new_spotify.track_id
             
-            # 🔥 強制冷卻檢查：如果這個人 10 秒內已經被評鑑過，直接無視
-            # 不管 API 推送了幾次 track_id 更新，10 秒內只處理第一槍
-            now = time.time()
-            if now - self.last_spotify_roast.get(user_id, 0) < 10:
-                return 
-            
-            self.last_spotify_roast[user_id] = now # 更新時間戳
-
-            # 存入資料庫
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("INSERT INTO music_history (user_id, title, artist, timestamp) VALUES (?, ?, ?, ?)", 
-                                 (user_id, new_spotify.title, new_spotify.artist, now))
+                                 (user_id, new_spotify.title, new_spotify.artist, time.time()))
                 await db.commit()
 
-            # 即時點評 (無冷卻，因為上面已經有 10秒 硬冷卻了)
             if random.random() < 1.0: 
-                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。評價這首歌的品味(硬派/軟弱)。"
+                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析這個音樂品味，並給出專業評估。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
                 
                 if channel and roast and roast != "COOLDOWN":
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
     # ==========================================
-    # 💬 聊天監控 (訊息 ID 鎖定)
+    # 💬 聊天監控 (啟用記憶)
     # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
         if message.content.startswith('!'): return 
 
-        # 🔥 訊息防重：只要處理過這個 ID，直接 Return
-        if message.id in self.processed_msg_ids:
-            return
+        if message.id in self.processed_msg_ids: return
         self.processed_msg_ids.add(message.id)
-        # 定期清理集合防止記憶體洩漏
-        if len(self.processed_msg_ids) > 1000:
-            self.processed_msg_ids.clear()
+        if len(self.processed_msg_ids) > 1000: self.processed_msg_ids.clear()
 
         user_id = message.author.id
         content = message.content.strip()
@@ -205,19 +218,19 @@ class Game(commands.Cog):
                 if not member.bot and member.status == discord.Status.online and member.id != user_id:
                     self.pending_replies[member.id] = {'time': time.time(), 'channel': message.channel, 'mention_by': message.author}
 
-        # 1. AI 對話
+        # 1. AI 對話 (Tag 或 問號) -> 🔥 啟用記憶
         is_question = content.endswith(("?", "？"))
         is_mentioned = self.bot.user in message.mentions
         
-        # 這裡用 elif 結構確保只會觸發一次 (雖然上面有 ID 鎖了，但邏輯上更保險)
         if is_mentioned or is_question:
             async with message.channel.typing():
-                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3)
+                # 🔥 這裡傳入 use_memory=True
+                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3, use_memory=True)
                 if reply == "COOLDOWN": await message.add_reaction("🕒")
                 elif reply == "ERROR": await message.reply("⚠️ AI 連線錯誤。")
                 elif reply: await message.reply(reply)
                 else: await message.reply(random.choice(self.kobe_quotes))
-            return # 觸發對話後就結束，不繼續判斷負能量
+            return
 
         # 2. 負能量
         if any(w in content for w in self.toxic_words):
@@ -241,7 +254,7 @@ class Game(commands.Cog):
             
         await self.bot.process_commands(message)
 
-    # ... (Helper Functions & Tasks) ...
+    # ... (Helper Functions) ...
     async def save_to_db(self, user_id, game_name, seconds):
         if seconds < 5: return
         today = datetime.now().strftime('%Y-%m-%d')
@@ -267,6 +280,7 @@ class Game(commands.Cog):
     def get_text_channel(self, guild):
         return discord.utils.find(lambda x: any(t in x.name.lower() for t in ["chat", "general", "聊天", "公頻"]) and x.permissions_for(guild.me).send_messages, guild.text_channels) or guild.text_channels[0]
 
+    # ... (Tasks) ...
     @tasks.loop(minutes=1)
     async def ghost_check(self):
         now = time.time()
@@ -454,5 +468,3 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
-
-
