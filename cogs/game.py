@@ -52,9 +52,9 @@ class Game(commands.Cog):
             "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
             "2. **對話**：如果這是連續對話，請參考前文回答。\n"
-            "3. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名。\n"
-            "4. **錯字/邏輯**：嚴厲糾正。\n"
-            "5. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
+            "3. **音樂審判**：你是心理學大師，透過歌名 歌詞 音樂分析心理狀態。要提及歌名。\n"
+            "4. **錯字/邏輯/廢話**：糾正。\n"
+            "5. 繁體中文(台灣)，30字內，多用 emoji 。"
         )
 
     async def cog_load(self):
@@ -140,7 +140,7 @@ class Game(commands.Cog):
                     if resp.status != 200: return "圖片讀取失敗。"
                     data = await resp.read()
             image = Image.open(io.BytesIO(data))
-            reply = await self.ask_kobe("分析這張圖片。分類(食物/程式/遊戲)並毒舌點評。", user_id, {}, 0, image=image, use_memory=False)
+            reply = await self.ask_kobe("分析這張圖片 評論。", user_id, {}, 0, image=image, use_memory=False)
             return reply or "我看不到曼巴精神。🐍"
         except: return random.choice(self.kobe_quotes)
 
@@ -185,7 +185,7 @@ class Game(commands.Cog):
                 await db.commit()
 
             # 🔥 機率 20%
-            if random.random() < 0.2: 
+            if random.random() < 0.8: 
                 prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析為什麼聽這首歌 以及分析歌詞與歌名 要提及歌名。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
                 if channel and roast and "⚠️" not in str(roast) and roast != "COOLDOWN":
@@ -253,7 +253,7 @@ class Game(commands.Cog):
             return
 
         elif has_weak:
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
+            await message.channel.send(f"{message.author.mention} 累了？尼哥！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
             
         await self.bot.process_commands(message)
@@ -311,7 +311,7 @@ class Game(commands.Cog):
             member = guild.get_member(user_id)
             channel = self.get_text_channel(guild)
             if member and channel:
-                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎", user_id, {}, 0) or f"{member.mention} {time_str}了！"
+                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他不想畢業了嗎", user_id, {}, 0) or f"{member.mention} {time_str}了！"
                 await channel.send(f"⚠️ **{time_str} 警報** {member.mention}\n{msg}")
                 await self.update_daily_stats(user_id, "lazy_points", penalty)
 
@@ -440,3 +440,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
