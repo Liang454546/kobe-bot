@@ -51,7 +51,7 @@ class Game(commands.Cog):
         self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.toxic_words = ["幹", "靠", "爛", "輸"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
+        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強nigga。🐍", "Soft. 🥚"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -96,11 +96,11 @@ class Game(commands.Cog):
 
         try:
             sys_prompt = (
-                "你是 Kobe Bryant。個性：毒舌、嚴格、偏執於細節。\n"
-                "1. **音樂審判**：你是運動心理學大師，透過音樂分析心理狀態。如果是軟綿綿的歌，罵他心態疲軟；如果是硬派歌，稱讚他鬥志高昂。\n"
-                "2. **錯字/邏輯**：嚴厲糾正。\n"
+                "你是 Kobe Bryant。個性：真實 不恭維 專業 現實 專注於問題。\n"
+                "1. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名 介紹一下 跟分析歌詞。\n"
+                "2. **錯字/邏輯/廢話**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
-                "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
+                "4. 繁體中文(台灣)，30字內，多用 emoji 。"
             )
             contents = [sys_prompt, f"情境：{prompt}"]
             if image: contents.append(image)
@@ -133,8 +133,8 @@ class Game(commands.Cog):
             # AI 分析 Prompt
             prompt = (
                 f"這是用戶 {ctx.author.display_name} 這週聽的歌單 (最近 20 首)：\n{song_list}\n"
-                "請以 **「曼巴精神心理學家」** 的身份，分析他的心理狀態。\n"
-                "1. 他的音樂品味反映了什麼心態？(是想贏？還是想偷懶？)\n"
+                "請以 **「精神心理學家」** 的身份，分析他的心理狀態。\n"
+                "1. 他的音樂品味反映了什麼心態？\n"
                 "2. 給出一個毒舌但中肯的心理素質評分 (0-100)。"
             )
             
@@ -443,3 +443,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
