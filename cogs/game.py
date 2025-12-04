@@ -100,8 +100,8 @@ class Game(commands.Cog):
         try:
             # 系統人設 (包含記憶邏輯)
             sys_prompt = (
-                "你是 Kobe Bryant。個性：毒舌、嚴格、偏執於細節。\n"
-                "1. **音樂審判**：如果是軟綿綿的歌(情歌/流行)，罵他軟蛋；如果是硬派(搖滾/嘻哈)，稱讚節奏。\n"
+                "你是 Kobe Bryant。個性不恭維 真實 專注回答問題。\n"
+                "1. **音樂審判**：不恭維 真實用心理學分析聽這首歌 以及分析歌詞 要提及歌名。\n"
                 "2. **錯字/邏輯**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
                 "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
@@ -424,3 +424,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
