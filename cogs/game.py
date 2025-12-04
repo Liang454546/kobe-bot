@@ -24,6 +24,10 @@ class Game(commands.Cog):
         self.active_sessions = {}
         self.pending_replies = {}
         
+        # 🔥 記憶系統
+        self.chat_histories = {} # {user_id: [{'role': 'user', 'parts': [...]}, ...]}
+        self.last_chat_time = {} # {user_id: timestamp}
+        
         # 冷卻系統
         self.cooldowns = {} 
         self.cooldown_locks = asyncio.Lock()
@@ -31,27 +35,17 @@ class Game(commands.Cog):
         self.ai_chat_cooldowns = {}
         self.status_cooldowns = {}
         self.image_cooldowns = {}
-        # self.spotify_cooldowns = {} # 音樂冷卻字典 (這次用不到了)
+        self.spotify_cooldowns = {} 
         
         # --- AI 設定 ---
         api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel("gemini-2.0-flash")
-                self.has_ai = True
-                logger.info("✅ Gemini 2.0 Flash 啟動成功 (音樂無冷卻版)")
-            except Exception as e:
-                logger.error(f"AI 啟動失敗: {e}")
-                self.has_ai = False
-        else:
-            self.has_ai = False
+        self.has_ai = True if api_key else False
 
         # 關鍵字庫
         self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.toxic_words = ["幹", "靠", "爛", "輸"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更尼哥哥。🐍", "我要爆氣了"]
+        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -67,15 +61,7 @@ class Game(commands.Cog):
         self.game_check.start()
         self.voice_check.start()
         self.ghost_check.start()
-
-        # 啟動時掃描遊戲
         await self.bot.wait_until_ready()
-        for guild in self.bot.guilds:
-            for member in guild.members:
-                if member.bot: continue
-                game = next((a.name for a in member.activities if a.type == discord.ActivityType.playing), None)
-                if game and member.id not in self.active_sessions:
-                    self.active_sessions[member.id] = {"game": game, "start": time.time(), "1h_warned": False, "2h_warned": False}
 
     async def cog_unload(self):
         self.daily_tasks.cancel()
@@ -84,36 +70,52 @@ class Game(commands.Cog):
         self.ghost_check.cancel()
 
     # ==========================================
-    # 🧠 AI 核心
+    # 🧠 AI 核心 (支援記憶)
     # ==========================================
-    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None):
+    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None, use_memory=False):
         if not self.has_ai: return None
         now = time.time()
         
-        # 冷卻檢查
         if user_id and cooldown_dict:
             if now - cooldown_dict.get(user_id, 0) < cooldown_time: return "COOLDOWN"
             cooldown_dict[user_id] = now
 
+        # 處理記憶
+        history = []
+        if use_memory and user_id:
+            # 如果超過 10 分鐘沒講話，清空記憶 (避免錯亂)
+            if now - self.last_chat_time.get(user_id, 0) > 600:
+                self.chat_histories[user_id] = []
+            history = self.chat_histories.get(user_id, [])
+            self.last_chat_time[user_id] = now
+
         try:
             sys_prompt = (
-                "你是 Kobe Bryant。個性：溫馨 不恭維 現實 專業 回答問題 。\n"
-                "1. **音樂審判**：要提出歌名 並分析用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。\n"
-                "2. **錯字/邏輯/廢話**：嚴厲糾正。\n"
-                "3. **團隊意識**：罵已讀不回的人。\n"
-                "4. 繁體中文(台灣)，30字內，多用 emoji 。"
+                "你是 Kobe Bryant。個性：毒舌、嚴格、偏執於細節。\n"
+                "1. **問問題**：專業且嚴厲地回答，不要硬扯籃球，直接給解決方案。\n"
+                "2. **偷懶/藉口**：狠狠罵他。\n"
+                "3. **音樂/遊戲**：嚴格審判品味。\n"
+                "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
             )
-            contents = [sys_prompt, f"情境：{prompt}"]
-            if image: contents.append(image)
             
-            response = await asyncio.to_thread(self.model.generate_content, contents=contents)
-            return response.text
+            # 呼叫中央大腦
+            reply = await self.bot.ask_brain(prompt, image=image, system_instruction=sys_prompt, history=history)
+            
+            # 更新記憶 (只在對話模式且無圖片時)
+            if use_memory and user_id and not image and reply:
+                history.append({"role": "user", "parts": [prompt]})
+                history.append({"role": "model", "parts": [reply]})
+                # 只保留最近 20 句 (10輪對話)
+                if len(history) > 20: history = history[-20:]
+                self.chat_histories[user_id] = history
+
+            return reply
         except Exception as e:
             logger.error(f"AI 錯誤: {e}") 
             return "ERROR"
 
     # ==========================================
-    # 🎯 狀態監控 (音樂偵測 - 無冷卻)
+    # 🎯 狀態監控 (遊戲 + Spotify)
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -121,16 +123,22 @@ class Game(commands.Cog):
         user_id = after.id
         channel = self.get_text_channel(after.guild)
         
-        # 1. 遊戲偵測
         new_game = next((a.name for a in after.activities if a.type == discord.ActivityType.playing), None)
         old_game = next((a.name for a in before.activities if a.type == discord.ActivityType.playing), None)
 
+        # 1. 遊戲開始
         if new_game and not old_game:
             self.active_sessions[user_id] = {"game": new_game, "start": time.time(), "1h_warned": False, "2h_warned": False}
-            prompt = f"用戶開始玩 {new_game}。" + ("痛罵他玩2K" if "2k" in new_game.lower() else "罵他不去訓練")
+            prompt = f"用戶開始玩 {new_game}。" + ("痛罵他玩2K是垃圾" if "2k" in new_game.lower() else "罵他不去訓練")
             roast = await self.ask_kobe(prompt, user_id, self.ai_roast_cooldowns, 300)
-            if channel: await channel.send(f"{after.mention} {roast or f'玩 {new_game}？去訓練！'}")
+            if channel: 
+                msg = f"{after.mention} {roast or f'玩 {new_game}？去訓練！'}"
+                await channel.send(msg)
+                # 🔥 將罵人的話寫入記憶，這樣用戶回嘴時 Bot 知道發生什麼事
+                if user_id in self.chat_histories:
+                    self.chat_histories[user_id].append({"role": "model", "parts": [msg]})
 
+        # 2. 遊戲結束
         elif old_game and not new_game:
             if user_id in self.active_sessions:
                 session = self.active_sessions[user_id]
@@ -141,23 +149,23 @@ class Game(commands.Cog):
                     interview = await self.ask_kobe(f"{after.display_name} 玩了 {duration//60} 分鐘 {old_game}。質問收穫。", user_id, self.ai_chat_cooldowns, 0)
                     if interview and interview != "COOLDOWN": await channel.send(f"🎤 **賽後採訪** {after.mention}\n{interview}")
 
-        # 2. 🔥 音樂偵測 (Spotify 品味審判) - 無冷卻版
+        # 3. 音樂偵測
         new_spotify = next((a for a in after.activities if isinstance(a, discord.Spotify)), None)
         old_spotify = next((a for a in before.activities if isinstance(a, discord.Spotify)), None)
         
         if new_spotify and (not old_spotify or new_spotify.track_id != old_spotify.track_id):
-            # 🔥 100% 機率觸發
-            if random.random() < 1.0: 
-                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。要提出歌名 並分析用心理學分析為什麼他要聽這首歌 不恭維 現實 專業。"
-                
-                # 🔥 關鍵修改：cooldown_dict 傳入空字典 {}，cooldown_time 設為 0
+            if random.random() < 1.0: # 100% 測試中
+                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。評價這首歌的品味(硬派/軟弱)。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
-                
                 if channel and roast and roast != "COOLDOWN":
-                    await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
+                    msg = f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}"
+                    await channel.send(msg)
+                    # 寫入記憶
+                    if user_id in self.chat_histories:
+                        self.chat_histories[user_id].append({"role": "model", "parts": [msg]})
 
     # ==========================================
-    # 💬 聊天監控
+    # 💬 聊天監控 (啟用記憶)
     # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -167,21 +175,30 @@ class Game(commands.Cog):
         user_id = message.author.id
         content = message.content.strip()
         
-        # A. 已讀不回解除
-        if user_id in self.pending_replies: del self.pending_replies[user_id]
+        # Log
+        if len(content) > 0:
+            async with aiosqlite.connect(self.db_name) as db:
+                await db.execute("INSERT INTO chat_logs (user_id, content, timestamp) VALUES (?, ?, ?)", (user_id, content, time.time()))
+                limit_time = time.time() - 86400
+                await db.execute("DELETE FROM chat_logs WHERE timestamp < ?", (limit_time,))
+                await db.commit()
 
-        # B. 註冊已讀不回
+        # Ghosting Check
+        if user_id in self.pending_replies: del self.pending_replies[user_id]
         if message.mentions:
             for member in message.mentions:
                 if not member.bot and member.status == discord.Status.online and member.id != user_id:
                     self.pending_replies[member.id] = {'time': time.time(), 'channel': message.channel, 'mention_by': message.author}
 
-        # 1. AI 對話
+        # 1. AI 對話 (Tag 或 問號)
         is_question = content.endswith(("?", "？"))
         is_mentioned = self.bot.user in message.mentions
+        
         if is_mentioned or is_question:
             async with message.channel.typing():
-                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3)
+                # 🔥 啟用記憶：use_memory=True
+                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3, use_memory=True)
+                
                 if reply == "COOLDOWN": await message.add_reaction("🕒")
                 elif reply == "ERROR": await message.reply("⚠️ AI 連線錯誤。")
                 elif reply: await message.reply(reply)
@@ -195,7 +212,7 @@ class Game(commands.Cog):
                 if roast and roast != "COOLDOWN": await message.reply(roast)
             return
 
-        # 3. 細節糾察 (20% 機率)
+        # 3. 細節糾察
         if len(content) > 10 and random.random() < 0.2:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"檢查這句話有無錯字邏輯：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
@@ -205,7 +222,7 @@ class Game(commands.Cog):
 
         # 4. 關鍵字
         if any(w in content for w in self.weak_words):
-            await message.channel.send(f"{message.author.mention} 累了廢物？尼哥！😤")
+            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
             
         await self.bot.process_commands(message)
@@ -267,7 +284,7 @@ class Game(commands.Cog):
             member = guild.get_member(user_id)
             channel = self.get_text_channel(guild)
             if member and channel:
-                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼沒救了", user_id, {}, 0) or f"{member.mention} {time_str}了！"
+                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎", user_id, {}, 0) or f"{member.mention} {time_str}了！"
                 await channel.send(f"⚠️ **{time_str} 警報** {member.mention}\n{msg}")
                 await self.update_daily_stats(user_id, "lazy_points", penalty)
 
@@ -284,7 +301,7 @@ class Game(commands.Cog):
                                 msg = await self.ask_kobe(f"{member.display_name} 在語音靜音。罵他。", user_id=member.id, cooldown_dict=self.status_cooldowns, cooldown_time=600)
                                 if msg and msg != "COOLDOWN": await channel.send(f"🔇 **靜音糾察** {member.mention}\n{msg}")
 
-    # !rank and !status commands (Same as before)
+    # !rank and !status
     @commands.command(aliases=['r'])
     async def rank(self, ctx):
         async with aiosqlite.connect(self.db_name) as db:
@@ -322,6 +339,31 @@ class Game(commands.Cog):
             embed.add_field(name=f"{stat_str} {member.display_name}", value=desc, inline=False)
         await ctx.send(embed=embed)
 
+    @commands.command(aliases=["summary", "recap", "總結"])
+    async def chat_summary(self, ctx):
+        async with ctx.typing():
+            async with aiosqlite.connect(self.db_name) as db:
+                limit_time = time.time() - 43200 
+                cursor = await db.execute("SELECT user_id, content FROM chat_logs WHERE timestamp > ? ORDER BY id DESC LIMIT 50", (limit_time,))
+                rows = await cursor.fetchall()
+            
+            if not rows: return await ctx.send("最近沒人說話，球場一片死寂。去訓練！")
+
+            chat_text = ""
+            for uid, content in reversed(rows):
+                member = ctx.guild.get_member(uid)
+                name = member.display_name if member else "有人"
+                chat_text += f"{name}: {content}\n"
+
+            prompt = f"以下是最近的對話紀錄，請總結重點，不要講廢話：\n\n{chat_text}"
+            summary = await self.ask_kobe(prompt, ctx.author.id, {}, 0)
+
+            if summary and summary != "COOLDOWN":
+                embed = discord.Embed(title="📋 戰術檢討會議", description=summary, color=0xe67e22)
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("分析失敗。")
+
     @tasks.loop(hours=24)
     async def daily_tasks(self):
         tz = timezone(timedelta(hours=8))
@@ -351,12 +393,15 @@ class Game(commands.Cog):
             prompt = (
                 f"今日違規名單：\n{chr(10).join(report_data)}\n\n"
                 f"今日對話紀錄：\n{chat_summary}\n\n"
-                "請以「曼巴日報總編輯」身份，寫不恭維恭維日報。"
+                "請以「曼巴日報總編輯」身份，寫一篇毒舌日報。總結大家今天都在聊什麼廢話，並點評表現最差的人。"
             )
             
             news_report = await self.ask_kobe(prompt, 0, {}, 0)
-            embed = discord.Embed(title="📰 曼巴日報", description=news_report, color=0xe74c3c)
+            
+            embed = discord.Embed(title="📰 曼巴日報 (The Mamba Daily)", description=news_report, color=0xe74c3c)
+            embed.set_footer(text="Mamba Mentality | 每日結算")
             await channel.send(embed=embed)
+
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("DELETE FROM daily_stats")
                 await db.commit()
@@ -369,4 +414,3 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
-
