@@ -14,6 +14,9 @@ from PIL import Image
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 🔥 已更新為您的指定頻道 ID
+TARGET_CHANNEL_ID = 1385233731073343498
+
 class Game(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -45,6 +48,7 @@ class Game(commands.Cog):
         self.toxic_words = ["幹", "靠", "爛", "輸"]
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
+        # 系統人設 (優化版)
         self.sys_prompt_template = (
             "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
@@ -76,6 +80,16 @@ class Game(commands.Cog):
         self.game_check.cancel()
         self.voice_check.cancel()
         self.ghost_check.cancel()
+
+    def get_text_channel(self, guild):
+        # 1. 嘗試抓取指定的 ID
+        channel = guild.get_channel(TARGET_CHANNEL_ID)
+        
+        # 2. 如果抓不到 (ID填錯或Bot沒權限)，回退到舊邏輯
+        if not channel:
+            return discord.utils.find(lambda x: any(t in x.name.lower() for t in ["chat", "general", "聊天", "公頻"]) and x.permissions_for(guild.me).send_messages, guild.text_channels) or guild.text_channels[0]
+        
+        return channel
 
     async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None, use_memory=False):
         if not hasattr(self.bot, 'ai_model') or not self.bot.ai_model: return None
@@ -142,6 +156,7 @@ class Game(commands.Cog):
     async def on_presence_update(self, before, after):
         if after.bot: return
         user_id = after.id
+        # 🔥 改用指定頻道
         channel = self.get_text_channel(after.guild)
         
         # 1. 遊戲偵測
@@ -185,7 +200,7 @@ class Game(commands.Cog):
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
     # ==========================================
-    # 💬 聊天監控 (修復：單問號不觸發)
+    # 💬 聊天監控
     # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -199,7 +214,6 @@ class Game(commands.Cog):
         user_id = message.author.id
         content = message.content.strip()
         
-        # Log
         if len(content) > 0:
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("INSERT INTO chat_logs (user_id, content, timestamp) VALUES (?, ?, ?)", (user_id, content, time.time()))
@@ -208,22 +222,18 @@ class Game(commands.Cog):
                     await db.execute("DELETE FROM chat_logs WHERE timestamp < ?", (limit_time,))
                 await db.commit()
 
-        # Ghosting Check
         if user_id in self.pending_replies: del self.pending_replies[user_id]
         if message.mentions:
             for member in message.mentions:
                 if not member.bot and member.status == discord.Status.online and member.id != user_id:
                     self.pending_replies[member.id] = {'time': time.time(), 'channel': message.channel, 'mention_by': message.author}
 
-        # 🔥 重構判斷邏輯：
-        # 1. 偵測問號：必須以 ? 結尾 且 長度大於 1 (防止只打一個 ? 就回)
         is_question = content.endswith(("?", "？")) and len(content) > 1
         is_mentioned = self.bot.user in message.mentions
         has_image = message.attachments and any(message.attachments[0].content_type.startswith(t) for t in ["image/"])
         has_toxic = any(w in content for w in self.toxic_words)
         has_weak = any(w in content for w in self.weak_words)
 
-        # 優先順序 1: 圖片 (Tag 或機率)
         if has_image:
             if is_mentioned or random.random() < 0.1:
                 async with message.channel.typing():
@@ -231,7 +241,6 @@ class Game(commands.Cog):
                     await message.reply(reply)
             return
 
-        # 優先順序 2: AI 對話 (Tag 或 有意義的問句)
         elif is_mentioned or is_question:
             async with message.channel.typing():
                 reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3, use_memory=True)
@@ -240,14 +249,12 @@ class Game(commands.Cog):
                 elif reply: await message.reply(reply)
             return
 
-        # 優先順序 3: 負能量
         elif has_toxic:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"用戶說：'{content}'。他在散播失敗主義。狠狠罵他。", user_id, self.ai_chat_cooldowns, 30)
                 if roast and "⚠️" not in str(roast) and roast != "COOLDOWN": await message.reply(roast)
             return
 
-        # 優先順序 4: 細節糾察
         elif len(content) > 10 and random.random() < 0.2:
             async with message.channel.typing():
                 roast = await self.ask_kobe(f"檢查這句話有無錯字邏輯：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
@@ -255,7 +262,6 @@ class Game(commands.Cog):
                     await message.reply(f"📝 **細節糾察**\n{roast}")
             return
 
-        # 優先順序 5: 關鍵字
         elif has_weak:
             await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
@@ -285,9 +291,6 @@ class Game(commands.Cog):
             await db.execute("UPDATE honor SET points = points + ? WHERE user_id = ?", (amount, user_id))
             await db.commit()
 
-    def get_text_channel(self, guild):
-        return discord.utils.find(lambda x: any(t in x.name.lower() for t in ["chat", "general", "聊天", "公頻"]) and x.permissions_for(guild.me).send_messages, guild.text_channels) or guild.text_channels[0]
-
     @tasks.loop(minutes=1)
     async def ghost_check(self):
         now = time.time()
@@ -316,6 +319,7 @@ class Game(commands.Cog):
         guild = self.bot.guilds[0] if self.bot.guilds else None
         if guild:
             member = guild.get_member(user_id)
+            # 🔥 改用指定頻道
             channel = self.get_text_channel(guild)
             if member and channel:
                 msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎", user_id, {}, 0) or f"{member.mention} {time_str}了！"
@@ -330,6 +334,7 @@ class Game(commands.Cog):
                     if member.bot: continue
                     if member.voice.self_mute:
                         if random.random() < 0.2:
+                            # 🔥 改用指定頻道
                             channel = self.get_text_channel(guild)
                             if channel:
                                 msg = await self.ask_kobe(f"{member.display_name} 在語音靜音。罵他。", user_id=member.id, cooldown_dict=self.status_cooldowns, cooldown_time=600)
@@ -423,6 +428,7 @@ class Game(commands.Cog):
         tz = timezone(timedelta(hours=8))
         now = datetime.now(tz)
         if now.hour == 23 and now.minute == 59:
+            # 🔥 改用指定頻道
             channel = self.get_text_channel(self.bot.guilds[0]) if self.bot.guilds else None
             if not channel: return
             async with aiosqlite.connect(self.db_name) as db:
