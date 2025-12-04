@@ -5,17 +5,19 @@ import random
 import logging
 import os
 import google.generativeai as genai
-import asyncio  # 必須在最上面
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 🔥 請在這裡填入您要指定的「頻道 ID」(數字)
+TARGET_CHANNEL_ID = 1385233731073343498
 
 class Daily(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.checked_today = False
         
-        # 勵志語錄（可持續增加）
         self.quotes = [
             "你見過凌晨四點的洛杉磯嗎？早安，曼巴們。🏀",
             "每一種負面情緒——壓力、挑戰——都是我崛起的機會。🐍",
@@ -25,7 +27,6 @@ class Daily(commands.Cog):
             "我不想和別人一樣，即使這個人是喬丹。——Kobe"
         ]
         
-        # 憤怒罵人語錄
         self.angry_roasts = [
             "😡 **{mention}**！現在凌晨四點你還亮著燈？你的肝是鐵做的嗎？去睡覺！",
             "🏀 **{mention}**，你以為你在練球嗎？不，你在修仙！給我滾去睡覺！",
@@ -35,16 +36,13 @@ class Daily(commands.Cog):
             "3 人小隊裡，就你還醒？**{mention}** 別拖後腿，睡吧！🐍"
         ]
         
-        # Gemini 設定
+        # 使用 main.py 的中央大腦，若無則用備用方案
         api_key = os.getenv("GEMINI_API_KEY")
         self.model = None
         if api_key:
             try:
                 genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(
-                    "gemini-1.5-flash",  # 改用更快更穩的 flash（或留 pro）
-                    generation_config={"temperature": 0.9, "max_output_tokens": 60}
-                )
+                self.model = genai.GenerativeModel("gemini-1.5-flash")
                 logger.info("✅ Daily Cog - Gemini AI 啟動成功")
             except Exception as e:
                 logger.error(f"Gemini 啟動失敗: {e}")
@@ -54,25 +52,19 @@ class Daily(commands.Cog):
     def cog_unload(self):
         self.morning_call.cancel()
 
-    # 安全呼叫 Gemini（完全異步）
     async def ask_kobe(self, prompt: str) -> str | None:
-        if not self.model:
-            return None
-            
-        full_prompt = (
-            "你是 Kobe Bryant，在一個只有 3 人的台灣小 Discord 當嚴格教練。\n"
-            "現在是凌晨 4 點，語氣要毒舌、嚴厲但勵志，用繁體中文（台灣腔），"
-            "一定要加籃球或蛇相關 emoji (🏀🐍)，控制在 40 字以內。\n\n"
-            f"情境：{prompt}"
-        )
-        
+        # 嘗試使用 main.py 的中央大腦
+        if hasattr(self.bot, 'ask_brain'):
+            reply = await self.bot.ask_brain(prompt, system_instruction="你是 Kobe Bryant，在凌晨4點的嚴格教練。")
+            if reply and "⚠️" not in reply:
+                return reply
+
+        # 備用方案
+        if not self.model: return None
         try:
-            response = await self.model.generate_content_async(full_prompt)
-            text = response.text.strip()
-            return text if text else None
-        except Exception as e:
-            logger.error(f"AI 生成失敗: {e}")
-            return None
+            response = await self.model.generate_content_async(f"你是 Kobe Bryant，現在凌晨4點。請毒舌罵人：{prompt}")
+            return response.text.strip()
+        except: return None
 
     @tasks.loop(seconds=60)
     async def morning_call(self):
@@ -84,7 +76,6 @@ class Daily(commands.Cog):
             self.checked_today = True
             logger.info("🕔 凌晨 4 點曼巴點名完成")
         elif now.hour == 4 and now.minute == 1:
-            # 過了 4:00 就重置，準備明天
             self.checked_today = False
 
     @morning_call.error
@@ -96,21 +87,24 @@ class Daily(commands.Cog):
             return
             
         guild = self.bot.guilds[0]
-        channel = discord.utils.get(guild.text_channels, name="general") \
-                  or discord.utils.get(guild.text_channels, name="聊天") \
-                  or next((c for c in guild.text_channels if "chat" in c.name.lower()), None) \
-                  or guild.system_channel
+        
+        # 🔥 修改：優先使用指定頻道 ID
+        channel = guild.get_channel(TARGET_CHANNEL_ID)
+        
+        if not channel:
+            channel = discord.utils.get(guild.text_channels, name="general") \
+                      or discord.utils.get(guild.text_channels, name="聊天") \
+                      or next((c for c in guild.text_channels if "chat" in c.name.lower()), None) \
+                      or guild.system_channel
                   
         if not channel or not channel.permissions_for(guild.me).send_messages:
             logger.warning("找不到可發送訊息的頻道")
             return
 
-        # 偵測真正熬夜的人（online + 有活動：遊戲、聽歌、串流等）
         stay_up_late = []
         for member in guild.members:
             if member.bot:
                 continue
-            # 只要 online 且不是純粹「自訂狀態」，就視為活躍
             if member.status == discord.Status.online:
                 has_real_activity = any(
                     act.type in (discord.ActivityType.playing,
@@ -123,7 +117,6 @@ class Daily(commands.Cog):
                     stay_up_late.append(member)
                     logger.info(f"🔥 偵測熬夜：{member.display_name}")
 
-        # 決定要罵還是勵志
         if stay_up_late:
             if len(stay_up_late) > 1:
                 names = "、".join(m.display_name for m in stay_up_late)
