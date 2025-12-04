@@ -48,7 +48,6 @@ class Game(commands.Cog):
         self.toxic_words = ["幹", "靠", "爛", "輸"]
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
-        # 系統人設 (修復括號問題)
         self.sys_prompt_template = (
             "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
@@ -71,14 +70,14 @@ class Game(commands.Cog):
         
         self.daily_tasks.start()
         self.game_check.start()
-        self.voice_check.start()
+        # self.voice_check.start() # 🔥 已移除靜音糾察
         self.ghost_check.start()
         await self.bot.wait_until_ready()
 
     async def cog_unload(self):
         self.daily_tasks.cancel()
         self.game_check.cancel()
-        self.voice_check.cancel()
+        # self.voice_check.cancel() # 🔥 已移除
         self.ghost_check.cancel()
 
     def get_text_channel(self, guild):
@@ -145,7 +144,9 @@ class Game(commands.Cog):
             return reply or "我看不到曼巴精神。🐍"
         except: return random.choice(self.kobe_quotes)
 
-    # 狀態監控
+    # ==========================================
+    # 🎯 狀態監控
+    # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
         if after.bot: return
@@ -192,7 +193,9 @@ class Game(commands.Cog):
                 if channel and roast and "⚠️" not in str(roast) and roast != "COOLDOWN":
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
-    # 聊天監控
+    # ==========================================
+    # 💬 聊天監控
+    # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
@@ -316,19 +319,6 @@ class Game(commands.Cog):
                 await channel.send(f"⚠️ **{time_str} 警報** {member.mention}\n{msg}")
                 await self.update_daily_stats(user_id, "lazy_points", penalty)
 
-    @tasks.loop(seconds=60)
-    async def voice_check(self):
-        for guild in self.bot.guilds:
-            for vc in guild.voice_channels:
-                for member in vc.members:
-                    if member.bot: continue
-                    if member.voice.self_mute:
-                        if random.random() < 0.2:
-                            channel = self.get_text_channel(guild)
-                            if channel:
-                                msg = await self.ask_kobe(f"{member.display_name} 在語音靜音。罵他。", user_id=member.id, cooldown_dict=self.status_cooldowns, cooldown_time=600)
-                                if msg and "⚠️" not in str(msg): await channel.send(f"🔇 **靜音糾察** {member.mention}\n{msg}")
-
     # 指令區
     @commands.command(aliases=['r'])
     async def rank(self, ctx):
@@ -442,10 +432,9 @@ class Game(commands.Cog):
                 embed = discord.Embed(title="📰 曼巴日報", description=news, color=0xe74c3c)
                 await channel.send(embed=embed)
 
-            # 🔥 清空今日戰績
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("DELETE FROM daily_stats")
-                await db.execute("DELETE FROM playtime") # 清空遊戲時長
+                await db.execute("DELETE FROM playtime") # 🔥 清空每日遊戲時間
                 await db.commit()
     
     @game_check.before_loop
