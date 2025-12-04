@@ -26,17 +26,17 @@ intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ==========================================
-# 🧠 中央 AI 大腦 (自動修復版)
+# 🧠 中央 AI 大腦 (自動修復增強版)
 # ==========================================
 bot.ai_model = None
 
-# 備選模型清單 (優先順序)
+# 備選模型清單 (優先順序：由新到舊)
 MODEL_CANDIDATES = [
-    "gemini-1.5-flash", 
+    "gemini-2.0-flash-exp",    # 最新最強 (實驗版)
+    "gemini-1.5-flash",        # 最穩定快速
     "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-001",
     "gemini-1.5-pro",
-    "gemini-pro"
+    "gemini-pro"               # 舊版保底
 ]
 
 async def init_ai():
@@ -61,10 +61,14 @@ async def init_ai():
                     logger.info(f"✅ AI 啟動成功！使用模型: {model_name}")
                     return # 成功就離開
             except Exception as e:
-                logger.warning(f"❌ 模型 {model_name} 測試失敗: {e}")
-                continue # 失敗就試下一個
+                # 404 代表該 Key 無權限存取此模型，繼續試下一個
+                if "404" in str(e):
+                    logger.warning(f"⚠️ 模型 {model_name} 無法使用 (404 Not Found)，嘗試下一個...")
+                else:
+                    logger.warning(f"❌ 模型 {model_name} 測試失敗: {e}")
+                continue 
 
-        logger.error("🚫 所有模型測試皆失敗，請檢查 API Key 權限或網路狀態。")
+        logger.error("🚫 所有模型測試皆失敗！請檢查您的 API Key 是否正確，或是否來自 Google AI Studio。")
 
     except Exception as e:
         logger.error(f"❌ AI 初始化嚴重錯誤: {e}")
@@ -72,7 +76,7 @@ async def init_ai():
 # 通用 AI 呼叫函式
 async def ask_brain(prompt, image=None, system_instruction=None, history=None):
     if not bot.ai_model: 
-        return "⚠️ AI 系統離線中 (請檢查後台 Logs)"
+        return "⚠️ AI 系統離線中 (API Key 錯誤)"
     
     try:
         base_prompt = system_instruction or "你是 Kobe Bryant。語氣毒舌、嚴格。繁體中文(台灣)。"
@@ -128,6 +132,7 @@ async def main():
     if not TOKEN:
         logger.error("錯誤：找不到 TOKEN，請檢查環境變數！")
         return
+        
     async with bot:
         keep_alive()
         auto_ping()
