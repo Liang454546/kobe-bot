@@ -46,12 +46,12 @@ class Game(commands.Cog):
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
         self.sys_prompt_template = (
-            "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
-            "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
+            "你是 Kobe Bryant。個性：真實、不恭維、專業、現實。\n"
+            "1. **回答問題**：針對用戶問題給予專業、實用的建議。**絕對不要硬扯籃球**，除非真的很貼切。\n"
             "2. **對話**：如果這是連續對話，請參考前文回答。\n"
-            "3. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名。\n"
-            "4. **錯字/邏輯**：嚴厲糾正。\n"
-            "5. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
+            "3. **音樂審判**：你是心理學大師，透過音樂歌名與歌詞內容分析心理狀態。要提及歌名。\n"
+            "4. **錯字/邏輯**：友善糾正。\n"
+            "5. 繁體中文(台灣)，30字內，多用 emoji 。"
         )
 
     async def cog_load(self):
@@ -179,11 +179,11 @@ class Game(commands.Cog):
                 await db.commit()
 
             # 🔥 機率 20%
-            if random.random() < 0.2: 
-                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析這個音樂品味。"
+            if random.random() < 0.7: 
+                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析為什麼聽這首歌 以及分析歌詞與歌名 要提及歌名。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
                 if channel and roast and "⚠️" not in roast and roast != "COOLDOWN":
-                    await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
+                    await channel.send(f"🎵 **DJ NIGGA 點評** {after.mention}\n{roast}")
 
     # ==========================================
     # 💬 聊天監控
@@ -251,7 +251,7 @@ class Game(commands.Cog):
 
         # 關鍵字
         if any(w in content for w in self.weak_words):
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
+            await message.channel.send(f"{message.author.mention} 累了？尼哥！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
             
         await self.bot.process_commands(message)
@@ -454,3 +454,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
