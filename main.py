@@ -1,12 +1,11 @@
 import discord
+from discord.ext import commands
 import os
 import asyncio
 import logging
-from discord.ext import commands
 from dotenv import load_dotenv
-from keep_alive import keep_alive, auto_ping  # 若無，移除這行
+from keep_alive import keep_alive, auto_ping
 import google.generativeai as genai
-from PIL import Image  # 為測試加
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -19,92 +18,89 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.members = True
-intents.presences = True  # 注意：需伺服器權限
+intents.presences = True 
 
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ==========================================
-# 🧠 中央 AI 大腦
+# 🧠 中央 AI 大腦 (自動修復版)
 # ==========================================
 bot.ai_model = None
 
+MODEL_CANDIDATES = [
+    "gemini-2.5-flash", 
+    "gemini-2.0-flash-exp", 
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-pro"
+]
+
 async def init_ai():
     if not GEMINI_KEY:
-        logger.warning("⚠️ 找不到 GEMINI_API_KEY")
+        logger.warning("⚠️ 找不到 GEMINI_API_KEY，AI 功能將無法使用")
         return
 
     try:
         genai.configure(api_key=GEMINI_KEY)
+        logger.info("🔄 正在初始化 AI 大腦...")
         
-        # 🔥 2025 年穩定模型：支援多模態，避免 1.5-flash 404
-        model_name = "gemini-2.5-flash"
-        
-        bot.ai_model = genai.GenerativeModel(
-            model_name,
-            generation_config=genai.types.GenerationConfig(
-                candidate_count=1,
-                max_output_tokens=100,  # 限 100 token
-                temperature=0.7  # 適合 roast 的創意
-            )
-        )
-        
-        # 開機測試：文字 + 圖片多模態
-        await asyncio.to_thread(bot.ai_model.generate_content, "Hi")
-        test_image = Image.new('RGB', (100, 100), color='red')
-        response = await asyncio.to_thread(bot.ai_model.generate_content, ["描述這張圖", test_image])
-        if not response.text:
-            raise ValueError("模型不支援多模態")
-        logger.info(f"✅ AI 啟動成功！使用模型: {model_name}")
+        for model_name in MODEL_CANDIDATES:
+            try:
+                model = genai.GenerativeModel(model_name)
+                # 🔥 使用更明確的測試語句，避免被 Safety Filter 擋下
+                logger.info(f"🧪 測試模型連線: {model_name}...")
+                response = await asyncio.to_thread(model.generate_content, "Hello, system check.")
+                
+                if response and response.text:
+                    bot.ai_model = model
+                    logger.info(f"✅ AI 啟動成功！已鎖定使用模型: {model_name}")
+                    return 
+            except Exception as e:
+                # 忽略 404/429/Safety 等錯誤，繼續試下一個
+                logger.warning(f"⚠️ 模型 {model_name} 測試失敗: {e}")
+                continue 
+
+        logger.error("🚫 所有模型測試皆失敗！請檢查您的 API Key 是否正確。")
 
     except Exception as e:
-        logger.error(f"❌ AI 初始化失敗: {e}")
-        logger.error("💡 請檢查 API Key 或使用 debug_ai.py 檢查可用模型。")
-        # 列出可用模型
-        try:
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            logger.info(f"可用模型: {models[:3]}...")
-        except:
-            pass
+        logger.error(f"❌ AI 初始化嚴重錯誤: {e}")
 
 async def ask_brain(prompt, image=None, system_instruction=None, history=None):
-    if not bot.ai_model: return "⚠️ AI 系統離線中 (請檢查後台)"
+    if not bot.ai_model: return "⚠️ AI 系統離線中"
     
     try:
-        base_prompt = system_instruction or "你是 Kobe Bryant。繁體中文。"
+        base_prompt = system_instruction or "你是 Kobe Bryant。語氣毒舌、嚴格。繁體中文(台灣)。"
         contents = []
         
-        # 統一處理歷史（限 20 項目，避免 token 溢）
         if history:
-            trimmed_history = history[-20:] if len(history) > 20 else history
-            contents.extend(trimmed_history)
-        
-        # 初始系統提示
-        if not contents:
-            contents.append({"role": "user", "parts": [base_prompt]})
-            contents.append({"role": "model", "parts": ["收到。"]})
-        
-        # 新用戶訊息
-        user_parts = [f"用戶輸入：{prompt}"]
-        if image:
-            # 手動轉 Base64（備案，若 SDK 自動失效）
-            import base64
-            import io
-            buffered = io.BytesIO()
-            image.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            user_parts.append({
-                'inline_data': {'mime_type': 'image/jpeg', 'data': img_str}
-            })
-        contents.append({"role": "user", "parts": user_parts})
+            if not history:
+                contents.append({"role": "user", "parts": [base_prompt]})
+                contents.append({"role": "model", "parts": ["收到。"]})
+            else:
+                contents.extend(history)
+            
+            user_parts = [prompt]
+            if image: user_parts.append(image)
+            contents.append({"role": "user", "parts": user_parts})
+        else:
+            parts = [base_prompt, f"情境/用戶輸入：{prompt}"]
+            if image: parts.append(image)
+            contents = parts
 
+        # 加入 try-except 避免生成失敗導致崩潰
         response = await asyncio.to_thread(bot.ai_model.generate_content, contents=contents)
+        
+        # 檢查是否有內容被阻擋 (Safety)
+        if not response.text:
+            return "⚠️ 內容被 AI 安全系統阻擋 (Safety Block)"
+            
         return response.text.strip()
 
     except Exception as e:
+        if "429" in str(e):
+            return "⚠️ 思緒混亂 (API 額度滿了，請休息一下)"
         logger.error(f"AI 生成錯誤: {e}")
-        if "404" in str(e): return "⚠️ 模型更新中，請重啟 bot。"
-        if "429" in str(e): return "⚠️ AI 額度滿了 (Rate Limit)，請稍候。"
-        return "⚠️ AI 連線錯誤 (404/429)，請稍後再試。"
+        return "⚠️ 發生錯誤，請稍後再試。"
 
 bot.ask_brain = ask_brain
 
@@ -130,8 +126,9 @@ async def main():
     if not TOKEN:
         logger.error("錯誤：找不到 TOKEN")
         return
-    keep_alive()  # 若無，移除
     async with bot:
+        keep_alive()
+        auto_ping()
         await bot.start(TOKEN)
 
 if __name__ == "__main__":
