@@ -14,7 +14,7 @@ from PIL import Image
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 🔥 已更新為您的指定頻道 ID
+# 🔥 請確認這裡填入的是您的「指定頻道 ID」
 TARGET_CHANNEL_ID = 1385233731073343498
 
 class Game(commands.Cog):
@@ -48,7 +48,7 @@ class Game(commands.Cog):
         self.toxic_words = ["幹", "靠", "爛", "輸"]
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
-        # 系統人設 (優化版)
+        # 系統人設 (修復括號問題)
         self.sys_prompt_template = (
             "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
@@ -82,13 +82,9 @@ class Game(commands.Cog):
         self.ghost_check.cancel()
 
     def get_text_channel(self, guild):
-        # 1. 嘗試抓取指定的 ID
         channel = guild.get_channel(TARGET_CHANNEL_ID)
-        
-        # 2. 如果抓不到 (ID填錯或Bot沒權限)，回退到舊邏輯
         if not channel:
             return discord.utils.find(lambda x: any(t in x.name.lower() for t in ["chat", "general", "聊天", "公頻"]) and x.permissions_for(guild.me).send_messages, guild.text_channels) or guild.text_channels[0]
-        
         return channel
 
     async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None, use_memory=False):
@@ -149,14 +145,11 @@ class Game(commands.Cog):
             return reply or "我看不到曼巴精神。🐍"
         except: return random.choice(self.kobe_quotes)
 
-    # ==========================================
-    # 🎯 狀態監控
-    # ==========================================
+    # 狀態監控
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
         if after.bot: return
         user_id = after.id
-        # 🔥 改用指定頻道
         channel = self.get_text_channel(after.guild)
         
         # 1. 遊戲偵測
@@ -196,12 +189,10 @@ class Game(commands.Cog):
             if random.random() < 0.2: 
                 prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析為什麼聽這首歌 以及分析歌詞與歌名 要提及歌名。"
                 roast = await self.ask_kobe(prompt, user_id, {}, 0) 
-                if channel and roast and "⚠️" not in roast and roast != "COOLDOWN":
+                if channel and roast and "⚠️" not in str(roast) and roast != "COOLDOWN":
                     await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
-    # ==========================================
-    # 💬 聊天監控
-    # ==========================================
+    # 聊天監控
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
@@ -319,7 +310,6 @@ class Game(commands.Cog):
         guild = self.bot.guilds[0] if self.bot.guilds else None
         if guild:
             member = guild.get_member(user_id)
-            # 🔥 改用指定頻道
             channel = self.get_text_channel(guild)
             if member and channel:
                 msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎", user_id, {}, 0) or f"{member.mention} {time_str}了！"
@@ -334,7 +324,6 @@ class Game(commands.Cog):
                     if member.bot: continue
                     if member.voice.self_mute:
                         if random.random() < 0.2:
-                            # 🔥 改用指定頻道
                             channel = self.get_text_channel(guild)
                             if channel:
                                 msg = await self.ask_kobe(f"{member.display_name} 在語音靜音。罵他。", user_id=member.id, cooldown_dict=self.status_cooldowns, cooldown_time=600)
@@ -351,8 +340,8 @@ class Game(commands.Cog):
         for uid, session in self.active_sessions.items():
             stats[uid] = stats.get(uid, 0) + int(now - session['start'])
         sorted_stats = sorted(stats.items(), key=lambda x: x[1], reverse=True)[:10]
-        if not sorted_stats: return await ctx.send("📊 無遊戲紀錄！")
-        embed = discord.Embed(title="🏆 遊戲時長排行榜", color=0xffd700)
+        if not sorted_stats: return await ctx.send("📊 今天還沒人開始訓練！")
+        embed = discord.Embed(title="📅 今日遊戲時長排行榜 (每日重置)", color=0xffd700)
         desc = ""
         for i, (uid, seconds) in enumerate(sorted_stats):
             member = ctx.guild.get_member(uid)
@@ -428,7 +417,6 @@ class Game(commands.Cog):
         tz = timezone(timedelta(hours=8))
         now = datetime.now(tz)
         if now.hour == 23 and now.minute == 59:
-            # 🔥 改用指定頻道
             channel = self.get_text_channel(self.bot.guilds[0]) if self.bot.guilds else None
             if not channel: return
             async with aiosqlite.connect(self.db_name) as db:
@@ -454,8 +442,10 @@ class Game(commands.Cog):
                 embed = discord.Embed(title="📰 曼巴日報", description=news, color=0xe74c3c)
                 await channel.send(embed=embed)
 
+            # 🔥 清空今日戰績
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("DELETE FROM daily_stats")
+                await db.execute("DELETE FROM playtime") # 清空遊戲時長
                 await db.commit()
     
     @game_check.before_loop
