@@ -23,6 +23,8 @@ class Game(commands.Cog):
         # 狀態儲存
         self.active_sessions = {}
         self.pending_replies = {}
+        self.last_music_processed = {} # 🔥 防雙重觸發：紀錄上次處理的歌 {user_id: track_id}
+        self.processed_msg_ids = set() # 🔥 防雙重觸發：紀錄已處理的訊息 ID
         
         # 冷卻系統
         self.cooldowns = {} 
@@ -40,7 +42,7 @@ class Game(commands.Cog):
                 genai.configure(api_key=api_key)
                 self.model = genai.GenerativeModel("gemini-2.0-flash")
                 self.has_ai = True
-                logger.info("✅ Gemini 2.0 Flash 啟動成功 (音樂心理分析版)")
+                logger.info("✅ Gemini 2.0 Flash 啟動成功 (防雙重觸發版)")
             except Exception as e:
                 logger.error(f"AI 啟動失敗: {e}")
                 self.has_ai = False
@@ -51,7 +53,7 @@ class Game(commands.Cog):
         self.weak_words = ["累", "好累", "想睡", "放棄", "休息"]
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.toxic_words = ["幹", "靠", "爛", "輸"]
-        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強nigga。🐍", "Soft. 🥚"]
+        self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
     async def cog_load(self):
         async with aiosqlite.connect(self.db_name) as db:
@@ -60,7 +62,6 @@ class Game(commands.Cog):
                 CREATE TABLE IF NOT EXISTS honor (user_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0, last_vote_date DATE);
                 CREATE TABLE IF NOT EXISTS daily_stats (user_id INTEGER PRIMARY KEY, msg_count INTEGER DEFAULT 0, lazy_points INTEGER DEFAULT 0, roasted_count INTEGER DEFAULT 0, last_updated DATE);
                 CREATE TABLE IF NOT EXISTS chat_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, content TEXT, timestamp REAL);
-                -- 🔥 新增：音樂紀錄表
                 CREATE TABLE IF NOT EXISTS music_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, title TEXT, artist TEXT, timestamp REAL);
             ''')
             await db.commit()
@@ -87,69 +88,36 @@ class Game(commands.Cog):
     # ==========================================
     # 🧠 AI 核心
     # ==========================================
-    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None):
+    async def ask_kobe(self, prompt, user_id=None, cooldown_dict=None, cooldown_time=30, image=None, use_history=False):
         if not self.has_ai: return None
         now = time.time()
+        
+        # 冷卻檢查
         if user_id and cooldown_dict:
             if now - cooldown_dict.get(user_id, 0) < cooldown_time: return "COOLDOWN"
             cooldown_dict[user_id] = now
 
         try:
+            # 系統人設 (包含記憶邏輯)
             sys_prompt = (
-                "你是 Kobe Bryant。個性：真實 不恭維 專業 現實 專注於問題。\n"
-                "1. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名 介紹一下 跟分析歌詞。\n"
-                "2. **錯字/邏輯/廢話**：嚴厲糾正。\n"
+                "你是 Kobe Bryant。個性：毒舌、嚴格、偏執於細節。\n"
+                "1. **音樂審判**：如果是軟綿綿的歌(情歌/流行)，罵他軟蛋；如果是硬派(搖滾/嘻哈)，稱讚節奏。\n"
+                "2. **錯字/邏輯**：嚴厲糾正。\n"
                 "3. **團隊意識**：罵已讀不回的人。\n"
-                "4. 繁體中文(台灣)，30字內，多用 emoji 。"
+                "4. 繁體中文(台灣)，50字內，多用 emoji (🏀🐍)。"
             )
-            contents = [sys_prompt, f"情境：{prompt}"]
-            if image: contents.append(image)
             
-            response = await asyncio.to_thread(self.model.generate_content, contents=contents)
-            return response.text
+            # 使用中央大腦
+            history = self.chat_histories.get(user_id, []) if use_history and user_id else None
+            reply = await self.bot.ask_brain(prompt, image=image, system_instruction=sys_prompt, history=history)
+            
+            return reply
         except Exception as e:
             logger.error(f"AI 錯誤: {e}") 
             return "ERROR"
 
     # ==========================================
-    # 🔥 新增：!s 音樂分析指令
-    # ==========================================
-    @commands.command(aliases=["s", "songs", "音樂"])
-    async def music_analysis(self, ctx):
-        """(AI) 分析這週聽歌紀錄與心理狀態"""
-        async with ctx.typing():
-            async with aiosqlite.connect(self.db_name) as db:
-                # 撈取過去 7 天的聽歌紀錄 (去重複，取最近 20 首)
-                week_ago = time.time() - 604800
-                cursor = await db.execute("SELECT DISTINCT title, artist FROM music_history WHERE user_id = ? AND timestamp > ? ORDER BY id DESC LIMIT 20", (ctx.author.id, week_ago))
-                rows = await cursor.fetchall()
-
-            if not rows:
-                return await ctx.send(f"{ctx.author.mention} 這週沒有聽歌紀錄。你在冥想訓練嗎？🧘‍♂️")
-
-            # 整理歌單
-            song_list = "\n".join([f"- {r[0]} by {r[1]}" for r in rows])
-            
-            # AI 分析 Prompt
-            prompt = (
-                f"這是用戶 {ctx.author.display_name} 這週聽的歌單 (最近 20 首)：\n{song_list}\n"
-                "請以 **「精神心理學家」** 的身份，分析他的心理狀態。\n"
-                "1. 他的音樂品味反映了什麼心態？\n"
-                "2. 給出一個毒舌但中肯的心理素質評分 (0-100)。"
-            )
-            
-            analysis = await self.ask_kobe(prompt, ctx.author.id, {}, 0) # 無冷卻
-
-            if analysis and analysis != "COOLDOWN":
-                embed = discord.Embed(title=f"🎵 本週音樂心理分析：{ctx.author.display_name}", description=analysis, color=0x1db954)
-                embed.add_field(name="🎧 最近播放", value=song_list[:1000], inline=False)
-                embed.set_footer(text="Mamba Mentality | 音樂即心智")
-                await ctx.send(embed=embed)
-            else:
-                await ctx.send("分析失敗，你的音樂品味太難以捉摸了。")
-
-    # ==========================================
-    # 🎯 狀態監控 (遊戲 + 🎵 音樂紀錄)
+    # 🎯 狀態監控 (含防雙重觸發)
     # ==========================================
     @commands.Cog.listener()
     async def on_presence_update(self, before, after):
@@ -177,32 +145,44 @@ class Game(commands.Cog):
                     interview = await self.ask_kobe(f"{after.display_name} 玩了 {duration//60} 分鐘 {old_game}。質問收穫。", user_id, self.ai_chat_cooldowns, 0)
                     if interview and interview != "COOLDOWN": await channel.send(f"🎤 **賽後採訪** {after.mention}\n{interview}")
 
-        # 2. 🔥 音樂偵測 + 紀錄到資料庫
+        # 2. 🔥 音樂偵測 (Spotify 品味審判) - 加強防抖動
         new_spotify = next((a for a in after.activities if isinstance(a, discord.Spotify)), None)
         old_spotify = next((a for a in before.activities if isinstance(a, discord.Spotify)), None)
         
         if new_spotify and (not old_spotify or new_spotify.track_id != old_spotify.track_id):
-            # A. 存入資料庫 (供 !s 分析用)
+            # 🔥 檢查是否剛剛才處理過這首歌 (防止重複)
+            if self.last_music_processed.get(user_id) == new_spotify.track_id:
+                return # 已經處理過這首歌了，跳過
+            
+            # 記錄這首歌已處理
+            self.last_music_processed[user_id] = new_spotify.track_id
+            
+            # A. 存入資料庫
             async with aiosqlite.connect(self.db_name) as db:
                 await db.execute("INSERT INTO music_history (user_id, title, artist, timestamp) VALUES (?, ?, ?, ?)", 
                                  (user_id, new_spotify.title, new_spotify.artist, time.time()))
                 await db.commit()
 
-            # B. 即時點評 (100% 觸發，無冷卻)
-            if random.random() < 1.0: 
-                prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。請用心理學分析這個音樂品味，並給出專業評估。"
-                roast = await self.ask_kobe(prompt, user_id, {}, 0) 
-                
-                if channel and roast and roast != "COOLDOWN":
-                    await channel.send(f"🎵 **音樂偵測** {after.mention}\n{roast}")
+            # B. 即時點評 (無冷卻，100% 觸發)
+            prompt = f"用戶正在聽 Spotify: {new_spotify.title} - {new_spotify.artist}。評價這首歌的品味(硬派/軟弱)。"
+            roast = await self.ask_kobe(prompt, user_id, {}, 0) # 無冷卻
+            
+            if channel and roast and roast != "COOLDOWN":
+                await channel.send(f"🎵 **DJ Mamba 點評** {after.mention}\n{roast}")
 
     # ==========================================
-    # 💬 聊天監控
+    # 💬 聊天監控 (含防雙重觸發)
     # ==========================================
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot: return
         if message.content.startswith('!'): return 
+        
+        # 🔥 防止同一則訊息被處理兩次 (雖然通常不會，但保險起見)
+        if message.id in self.processed_msg_ids: return
+        self.processed_msg_ids.add(message.id)
+        # 清理舊 ID (保持集合小巧)
+        if len(self.processed_msg_ids) > 100: self.processed_msg_ids.pop()
 
         user_id = message.author.id
         content = message.content.strip()
@@ -222,12 +202,13 @@ class Game(commands.Cog):
                 if not member.bot and member.status == discord.Status.online and member.id != user_id:
                     self.pending_replies[member.id] = {'time': time.time(), 'channel': message.channel, 'mention_by': message.author}
 
-        # 1. AI 對話
+        # 1. AI 對話 (Tag 或 問號)
         is_question = content.endswith(("?", "？"))
         is_mentioned = self.bot.user in message.mentions
         if is_mentioned or is_question:
             async with message.channel.typing():
-                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3)
+                # 使用記憶
+                reply = await self.ask_kobe(content, user_id, self.ai_chat_cooldowns, 3, use_history=True)
                 if reply == "COOLDOWN": await message.add_reaction("🕒")
                 elif reply == "ERROR": await message.reply("⚠️ AI 連線錯誤。")
                 elif reply: await message.reply(reply)
@@ -443,4 +424,3 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
-
