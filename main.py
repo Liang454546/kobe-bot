@@ -1,8 +1,8 @@
 import discord
-from discord.ext import commands
 import os
 import asyncio
 import logging
+from discord.ext import commands
 from dotenv import load_dotenv
 from keep_alive import keep_alive, auto_ping
 import google.generativeai as genai
@@ -23,7 +23,7 @@ intents.presences = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ==========================================
-# 🧠 中央 AI 大腦 (輕量穩定版)
+# 🧠 中央 AI 大腦
 # ==========================================
 bot.ai_model = None
 
@@ -34,24 +34,23 @@ async def init_ai():
 
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 🔥 直接鎖定最穩定的 flash 模型，不進行迴圈測試，節省額度
-        bot.ai_model = genai.GenerativeModel("gemini-1.5-flash")
         
-        # 輕量測試 (Ping 一下就好)
-        try:
-            await asyncio.to_thread(bot.ai_model.generate_content, "Hi")
-            logger.info("✅ AI 啟動成功 (Gemini 1.5 Flash)")
-        except Exception as e:
-            if "429" in str(e):
-                logger.warning("⚠️ AI 額度暫時額滿 (Rate Limit)，請稍等 1 分鐘後再試。")
-            else:
-                logger.error(f"❌ AI 連線測試失敗: {e}")
+        # 🔥 這裡使用目前 Google 提供「免費且最穩定」的模型
+        # 如果您的 debug_ai.py 顯示其他名稱，請修改這裡
+        model_name = "gemini-1.5-flash" 
+        
+        bot.ai_model = genai.GenerativeModel(model_name)
+        
+        # 開機測試
+        await asyncio.to_thread(bot.ai_model.generate_content, "Hi")
+        logger.info(f"✅ AI 啟動成功！使用模型: {model_name}")
 
     except Exception as e:
-        logger.error(f"❌ AI 初始化錯誤: {e}")
+        logger.error(f"❌ AI 初始化失敗: {e}")
+        logger.error("💡 請檢查 API Key 是否正確，或使用 debug_ai.py 檢查可用模型。")
 
 async def ask_brain(prompt, image=None, system_instruction=None, history=None):
-    if not bot.ai_model: return "⚠️ AI 冷卻中或未啟動"
+    if not bot.ai_model: return "⚠️ AI 系統離線中 (請檢查後台)"
     
     try:
         base_prompt = system_instruction or "你是 Kobe Bryant。繁體中文。"
@@ -63,11 +62,12 @@ async def ask_brain(prompt, image=None, system_instruction=None, history=None):
                 contents.append({"role": "model", "parts": ["收到。"]})
             else:
                 contents.extend(history)
-            user_parts = [prompt]
-            if image: user_parts.append(image)
-            contents.append({"role": "user", "parts": user_parts})
+            
+            user_msg = {"role": "user", "parts": [prompt]}
+            if image: user_msg["parts"].append(image)
+            contents.append(user_msg)
         else:
-            parts = [base_prompt, f"情境/用戶輸入：{prompt}"]
+            parts = [base_prompt, f"用戶輸入：{prompt}"]
             if image: parts.append(image)
             contents = parts
 
@@ -75,10 +75,8 @@ async def ask_brain(prompt, image=None, system_instruction=None, history=None):
         return response.text.strip()
 
     except Exception as e:
-        if "429" in str(e):
-            return "⚠️ 思緒混亂 (API 額度滿了，請休息一下)"
         logger.error(f"AI 生成錯誤: {e}")
-        return "⚠️ 發生錯誤"
+        return "⚠️ AI 連線錯誤 (404/429)，請稍後再試。"
 
 bot.ask_brain = ask_brain
 
