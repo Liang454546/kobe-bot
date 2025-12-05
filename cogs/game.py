@@ -49,7 +49,7 @@ class Game(commands.Cog):
         self.strong_words = ["健身", "訓練", "加班", "努力"]
         self.toxic_words = ["幹", "靠", "爛", "輸"]
         # 🔥 廢話偵測關鍵字
-        self.nonsense_words = ["哈哈", "lol", "笑死", "ww", "xd", "呵呵", "真假", "確實"]
+        self.nonsense_words = ["哈", "喔", "笑死", "恩", "4", "呵呵", "真假", "確實"]
         self.kobe_quotes = ["Mamba Out. 🎤", "別吵我，正在訓練。🏀", "那些殺不死你的，只會讓你更強。🐍", "Soft. 🥚"]
 
         self.sys_prompt_template = (
@@ -57,8 +57,8 @@ class Game(commands.Cog):
             "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
             "2. **對話**：如果這是連續對話，請參考前文回答。\n"
             "3. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名。\n"
-            "4. **錯字/邏輯**：嚴厲糾正。\n"
-            "5. 繁體中文(台灣)，30字內，多用 emoji (🏀🐍)。"
+            "4. **錯字/邏輯**：糾正。\n"
+            "5. 繁體中文(台灣)，30字內，多用 emoji 。"
         )
 
     async def cog_load(self):
@@ -150,7 +150,7 @@ class Game(commands.Cog):
                     if resp.status != 200: return "圖片讀取失敗。"
                     data = await resp.read()
             image = Image.open(io.BytesIO(data))
-            reply = await self.ask_kobe("分析這張圖片。分類(食物/程式/遊戲)並毒舌點評。", user_id, {}, 0, image=image, use_memory=False)
+            reply = await self.ask_kobe("分析這張圖片。並點評。", user_id, {}, 0, image=image, use_memory=False)
             return reply or "我看不到曼巴精神。🐍"
         except: return random.choice(self.kobe_quotes)
 
@@ -288,7 +288,7 @@ class Game(commands.Cog):
             return
 
         elif has_weak:
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
+            await message.channel.send(f"{message.author.mention} 累了尼哥！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
             
         await self.bot.process_commands(message)
@@ -492,7 +492,7 @@ class Game(commands.Cog):
                 name = member.display_name if member else "有人"
                 chat_text += f"{name}: {content}\n"
 
-            prompt = f"以下是最近的對話紀錄，請總結重點，不要講廢話：\n\n{chat_text}"
+            prompt = f"以下是最近的對話紀錄，請總結重點 並評論：\n\n{chat_text}"
             summary = await self.ask_kobe(prompt, ctx.author.id, {}, 0)
 
             if summary and "⚠️" not in str(summary):
@@ -600,3 +600,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
