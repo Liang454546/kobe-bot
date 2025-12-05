@@ -54,7 +54,7 @@ class Game(commands.Cog):
 
         self.sys_prompt_template = (
             "你是 Kobe Bryant。個性：真實、不恭維、專業、現實、專注於問題。\n"
-            "1. **回答問題**：針對用戶問題給予專業、嚴厲但實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
+            "1. **回答問題**：針對用戶問題給予專業、實用的建議。**絕對不要硬扯籃球比喻**，除非真的很貼切。\n"
             "2. **對話**：如果這是連續對話，請參考前文回答。\n"
             "3. **音樂審判**：你是心理學大師，透過音樂分析心理狀態。要提及歌名。\n"
             "4. **錯字/邏輯**：糾正。\n"
@@ -256,7 +256,7 @@ class Game(commands.Cog):
         has_weak = any(w in content for w in self.weak_words)
 
         if has_image:
-            if is_mentioned or random.random() < 0.1:
+            if is_mentioned or random.random() < 0.4:
                 async with message.channel.typing():
                     reply = await self.analyze_image(message.attachments[0].url, user_id)
                     await message.reply(reply)
@@ -282,7 +282,7 @@ class Game(commands.Cog):
 
         elif len(content) > 10 and random.random() < 0.2:
             async with message.channel.typing():
-                roast = await self.ask_kobe(f"檢查這句話有無錯字邏輯：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
+                roast = await self.ask_kobe(f"檢查這句話有廢話：'{content}'。若無錯回傳 PASS。", user_id, {}, 0)
                 if roast and "PASS" not in roast and "⚠️" not in str(roast) and roast != "COOLDOWN":
                     await message.reply(f"📝 **細節糾察**\n{roast}")
             return
@@ -600,4 +600,5 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
