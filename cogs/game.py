@@ -755,30 +755,40 @@ class Game(commands.Cog):
             logger.error(f"每日一問失敗: {e}")
 
     # ==================== 情緒雷達 + 深夜戰報 + before_loop ====================
-    @tasks.loop(minutes=15)
+      @tasks.loop(minutes=15)
     async def mood_radar(self):
         guild = self.bot.guilds[0] if self.bot.guilds else None
-        if not guild: return
+        if not guild:
             return
+        
         channel = self.get_text_channel(guild)
-        if not channel: return
+        if not channel:
+            return
 
         async with aiosqlite.connect(self.db_name) as db:
             limit = time.time() - 3600
-            cursor = await db.execute("SELECT content FROM chat_logs WHERE timestamp > ? ORDER BY id DESC LIMIT 25", (limit,))
+            cursor = await db.execute(
+                "SELECT content FROM chat_logs WHERE timestamp > ? ORDER BY id DESC LIMIT 25",
+                (limit,)
+            )
             rows = await cursor.fetchall()
-        if len(rows) < 8: return
+
+        if len(rows) < 8:
+            return
 
         text = " | ".join(r[0] for r in rows)
-        mood = await self.ask_kobe(f"用一個詞總結這25句話情緒：開心/低落/嗨/憤怒/正常\n內容：{text}", None, {}, 0)
-        if not mood: return
+        mood = await self.ask_kobe(
+            f"用一個詞總結這25句話情緒：開心/低落/嗨/憤怒/正常\n內容：{text}",
+            None, {}, 0
+        )
+        if not mood:
+            return
 
         if any(w in mood for w in ["低落", "難過", "累"]):
             await channel.send("https://youtu.be/V2v5ZsoR1Mk")
             await channel.send("「You don't get better sitting on the bench.」蛇")
-        elif any(w in mood for w in ["嗨", "瘋", "笑死"]):
+        elif any(w in mood for w in ["嗨", "瘋", "笑死", "哈哈"]):
             await channel.send("『你們這叫興奮？我叫這幼稚。去訓練。』死")
-
     @tasks.loop(hours=24)
     async def daily_summary_and_memory(self):
         tz = timezone(timedelta(hours=8))
@@ -814,5 +824,6 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
 
