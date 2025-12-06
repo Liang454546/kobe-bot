@@ -654,7 +654,7 @@ class Game(commands.Cog):
     async def weekly_tasks(self):
         tz = timezone(timedelta(hours=8))
         now = datetime.now(tz)
-        if now.weekday() == 6 and 20 <= .hour < 21:
+        if now.weekday() == 6 and 20 <= now.hour < 21:
             today_str = now.strftime("%Y-%m-%d")
             if getattr(self, '_weekly_executed', None) == today_str:
                 return
@@ -814,4 +814,5 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
 
