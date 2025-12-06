@@ -149,7 +149,7 @@ class Game(commands.Cog):
                     if resp.status != 200: return "圖片讀取失敗。"
                     data = await resp.read()
             image = Image.open(io.BytesIO(data))
-            reply = await self.ask_kobe("分析這張圖片。分類(食物/程式/遊戲)並毒舌點評。", user_id, self.image_cooldowns, 60, image=image, use_memory=False)
+            reply = await self.ask_kobe("分析這張圖片。評論 評分1/10。", user_id, self.image_cooldowns, 60, image=image, use_memory=False)
             return reply or "我看不到曼巴精神。🐍"
         except:
             return random.choice(self.kobe_quotes)
@@ -332,7 +332,7 @@ class Game(commands.Cog):
             return
 
         elif has_weak:
-            await message.channel.send(f"{message.author.mention} 累了？軟蛋！😤")
+            await message.channel.send(f"{message.author.mention} 累了？黑鬼！😤")
             await self.update_daily_stats(user_id, "lazy_points", 2)
 
         await self.bot.process_commands(message)
@@ -398,7 +398,7 @@ class Game(commands.Cog):
             member = guild.get_member(user_id)
             channel = self.get_text_channel(guild)
             if member and channel:
-                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他眼睛瞎了嗎", user_id, self.ai_roast_cooldowns, 300)
+                msg = await self.ask_kobe(f"用戶玩 {game} 超過 {time_str}，罵他想被當嗎", user_id, self.ai_roast_cooldowns, 300)
                 if msg and msg != "COOLDOWN":
                     await channel.send(f"⚠️ **{time_str} 警報** {member.mention}\n{msg}")
                     await self.update_daily_stats(user_id, "lazy_points", penalty)
@@ -802,3 +802,4 @@ class Game(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Game(bot))
+
